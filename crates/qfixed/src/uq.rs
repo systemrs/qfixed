@@ -4,6 +4,8 @@ use core::marker::PhantomData;
 
 use typenum::Unsigned;
 
+use crate::error::FixedError;
+
 /// Unsigned fixed-point number with `I` integer bits and `F` fractional bits.
 ///
 /// `I` and `F` are [`typenum`](crate::typenum) unsigned integers, e.g.
@@ -80,31 +82,48 @@ impl<I: Unsigned, F: Unsigned> UQ<I, F> {
         assert!(Self::TOTAL_BITS <= 64, "UQ type cannot exceed 64 bits");
     }
 
-    /// Constructs from a raw bit representation.
+    /// Constructs from a raw bit pattern (the low `I + F` bits).
     ///
-    /// Masked to `I + F` bits.
+    /// Any bits above the low `I + F` are **masked off** (never panics),
+    /// matching RTL register truncation. For a checked conversion use
+    /// [`try_from_bits`](Self::try_from_bits).
     ///
     /// # Arguments
     ///
-    /// * `raw` - The raw fixed-point value.
+    /// * `bits` - The raw bit pattern; only the low `I + F` bits are used.
     ///
     /// # Returns
     ///
     /// A new `UQ<I, F>` holding the masked value.
-    ///
-    /// # Panics
-    ///
-    /// In debug mode, panics if `raw` does not already fit in `I + F`
-    /// bits.
     #[inline]
-    pub const fn from_bits(raw: u64) -> Self {
-        Self::check();
-        let masked = raw & Self::MASK;
-        debug_assert!(
-            raw == masked,
-            "from_bits: value out of range for this UQ type"
-        );
-        Self(masked, PhantomData)
+    pub const fn from_bits(bits: u64) -> Self {
+        Self::from_raw(bits)
+    }
+
+    /// Constructs from a raw bit pattern, erroring if it does not fit.
+    ///
+    /// Like [`from_bits`](Self::from_bits) but returns
+    /// [`FixedError::OutOfRange`] instead of masking when `bits` sets any bit
+    /// above the low `I + F`.
+    ///
+    /// # Arguments
+    ///
+    /// * `bits` - The raw bit pattern.
+    ///
+    /// # Returns
+    ///
+    /// The reconstructed `UQ<I, F>`, or [`FixedError::OutOfRange`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FixedError::OutOfRange`] if `bits != bits & MASK`.
+    #[inline]
+    pub const fn try_from_bits(bits: u64) -> Result<Self, FixedError> {
+        if bits == bits & Self::MASK {
+            Ok(Self::from_raw(bits))
+        } else {
+            Err(FixedError::OutOfRange)
+        }
     }
 
     /// Extracts the raw bit representation.
@@ -146,9 +165,11 @@ impl<I: Unsigned, F: Unsigned> UQ<I, F> {
     /// Constructs from a count of fractional LSB units.
     ///
     /// One count is `2^-F` (one LSB), so the resulting value is
-    /// `count * 2^-F` and `count` is exactly the raw register word. Lossless;
-    /// the exact inverse of [`to_count`](Self::to_count). To build a whole
-    /// number use the [`From`] conversions (e.g. `UQ::from(3u32)`).
+    /// `count * 2^-F` and `count` is the raw register word. An out-of-range
+    /// `count` is **wrapped** (masked to `I + F` bits, like an RTL register) —
+    /// it never panics. For a checked conversion use
+    /// [`try_from_count`](Self::try_from_count); to build a whole number use
+    /// the [`From`] conversions (e.g. `UQ::from(3u32)`).
     ///
     /// # Arguments
     ///
@@ -156,19 +177,36 @@ impl<I: Unsigned, F: Unsigned> UQ<I, F> {
     ///
     /// # Returns
     ///
-    /// A new `UQ<I, F>` representing `count * 2^-F`.
-    ///
-    /// # Panics
-    ///
-    /// In debug mode, panics if `count` exceeds `MAX` for this type.
+    /// A new `UQ<I, F>` representing `count * 2^-F`, wrapped to range.
     #[inline]
     pub const fn from_count(count: u64) -> Self {
-        Self::check();
-        debug_assert!(
-            count <= Self::MAX.0,
-            "from_count: value out of range for this UQ type"
-        );
         Self::from_raw(count)
+    }
+
+    /// Constructs from a count of LSB units, erroring if out of range.
+    ///
+    /// Like [`from_count`](Self::from_count) but returns
+    /// [`FixedError::OutOfRange`] instead of wrapping when `count` exceeds
+    /// `MAX`.
+    ///
+    /// # Arguments
+    ///
+    /// * `count` - The number of `2^-F` units.
+    ///
+    /// # Returns
+    ///
+    /// The `UQ<I, F>` value, or [`FixedError::OutOfRange`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FixedError::OutOfRange`] if `count` exceeds `MAX`.
+    #[inline]
+    pub const fn try_from_count(count: u64) -> Result<Self, FixedError> {
+        if count <= Self::MAX.0 {
+            Ok(Self::from_raw(count))
+        } else {
+            Err(FixedError::OutOfRange)
+        }
     }
 
     /// Returns the value as a count of fractional LSB units.
@@ -195,13 +233,44 @@ impl<I: Unsigned, F: Unsigned> UQ<I, F> {
     ///
     /// # Returns
     ///
-    /// A new `UQ<I, F>` representing the quantized value.
+    /// A new `UQ<I, F>` representing the quantized value. Out-of-range or
+    /// non-finite inputs produce a wrapped/saturated value rather than
+    /// panicking; use [`try_from_f64`](Self::try_from_f64) for a checked
+    /// conversion.
     #[inline]
     pub fn from_f64(val: f64) -> Self {
         Self::check();
         let scale = (1u64 << Self::FRACTIONAL_BITS) as f64;
         let raw = (val * scale) as u64;
         Self::from_raw(raw)
+    }
+
+    /// Constructs from `f64`, erroring on non-finite or out-of-range input.
+    ///
+    /// # Arguments
+    ///
+    /// * `val` - The floating-point value to quantize.
+    ///
+    /// # Returns
+    ///
+    /// The quantized `UQ<I, F>` value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FixedError::NotFinite`] if `val` is NaN or infinite, or
+    /// [`FixedError::OutOfRange`] if it is negative or exceeds `MAX`.
+    #[inline]
+    pub fn try_from_f64(val: f64) -> Result<Self, FixedError> {
+        Self::check();
+        if !val.is_finite() {
+            return Err(FixedError::NotFinite);
+        }
+        let scale = (1u64 << Self::FRACTIONAL_BITS) as f64;
+        let scaled = val * scale;
+        if scaled < 0.0 || scaled > Self::MAX.0 as f64 {
+            return Err(FixedError::OutOfRange);
+        }
+        Ok(Self::from_raw(scaled as u64))
     }
 
     /// Converts to `f64`.
@@ -312,16 +381,46 @@ impl<I: Unsigned, F: Unsigned> UQ<I, F> {
     ///
     /// # Arguments
     ///
-    /// * `rhs` - The divisor (must not be zero).
+    /// * `rhs` - The divisor.
     ///
     /// # Returns
     ///
     /// The truncated quotient in the same `UQ<I, F>` format.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `rhs` is zero (in all build profiles). Use
+    /// [`checked_div`](Self::checked_div) to handle a zero divisor.
     #[inline]
     pub const fn wrapping_div(self, rhs: Self) -> Self {
         let numer = (self.0 as u128) << Self::FRACTIONAL_BITS;
         let result = (numer / rhs.0 as u128) as u64;
         Self::from_raw(result)
+    }
+
+    /// Checked same-type divide: `(self << F) / rhs`, or `None` if `rhs` is
+    /// zero.
+    ///
+    /// The numerator is widened in 128 bits before division to preserve
+    /// fractional precision; the quotient is truncated to `I + F` bits.
+    ///
+    /// # Arguments
+    ///
+    /// * `rhs` - The divisor.
+    ///
+    /// # Returns
+    ///
+    /// `Some(quotient)` in the same `UQ<I, F>` format, or `None` if `rhs` is
+    /// zero.
+    #[inline]
+    pub const fn checked_div(self, rhs: Self) -> Option<Self> {
+        if rhs.0 == 0 {
+            None
+        } else {
+            let numer = (self.0 as u128) << Self::FRACTIONAL_BITS;
+            let result = (numer / rhs.0 as u128) as u64;
+            Some(Self::from_raw(result))
+        }
     }
 
     /// Saturating addition: clamps to `MAX` on overflow.
@@ -403,24 +502,17 @@ impl<I: Unsigned, F: Unsigned> UQ<I, F> {
     ///
     /// The exact sum in `UQ<IO, FO>` format.
     ///
-    /// # Panics
+    /// # Compile-time checks
     ///
-    /// In debug mode, panics if `IO + FO < I + F + 1`.
+    /// Fails to compile if the output type is too narrow (`IO + FO <= I + F`).
     #[inline]
     pub fn widening_add<IO: Unsigned, FO: Unsigned>(self, rhs: Self) -> UQ<IO, FO> {
-        UQ::<IO, FO>::check();
-        debug_assert!(
-            UQ::<IO, FO>::TOTAL_BITS > Self::TOTAL_BITS,
-            "widening_add: output UQ<{}, {}> ({} bits) too narrow for UQ<{}, {}> + UQ<{}, {}> ({} bits needed)",
-            IO::U32,
-            FO::U32,
-            UQ::<IO, FO>::TOTAL_BITS,
-            I::U32,
-            F::U32,
-            I::U32,
-            F::U32,
-            Self::TOTAL_BITS + 1
-        );
+        const {
+            assert!(
+                UQ::<IO, FO>::TOTAL_BITS > Self::TOTAL_BITS,
+                "widening_add: output type too narrow (needs at least one more integer bit than the input)"
+            );
+        }
         let shift = FO::U32 as i32 - F::U32 as i32;
         let a = if shift >= 0 {
             (self.0 as u128) << shift
@@ -448,24 +540,17 @@ impl<I: Unsigned, F: Unsigned> UQ<I, F> {
     ///
     /// The exact difference as a signed `Q<IO, FO>`.
     ///
-    /// # Panics
+    /// # Compile-time checks
     ///
-    /// In debug mode, panics if `IO + FO < I + F + 1`.
+    /// Fails to compile if the output type is too narrow (`IO + FO <= I + F`).
     #[inline]
     pub fn widening_sub<IO: Unsigned, FO: Unsigned>(self, rhs: Self) -> crate::q::Q<IO, FO> {
-        crate::q::Q::<IO, FO>::check();
-        debug_assert!(
-            crate::q::Q::<IO, FO>::TOTAL_BITS > Self::TOTAL_BITS,
-            "widening_sub: output Q<{}, {}> ({} bits) too narrow for UQ<{}, {}> - UQ<{}, {}> ({} bits needed)",
-            IO::U32,
-            FO::U32,
-            crate::q::Q::<IO, FO>::TOTAL_BITS,
-            I::U32,
-            F::U32,
-            I::U32,
-            F::U32,
-            Self::TOTAL_BITS + 1
-        );
+        const {
+            assert!(
+                crate::q::Q::<IO, FO>::TOTAL_BITS > Self::TOTAL_BITS,
+                "widening_sub: output type too narrow (needs at least one more integer bit than the input)"
+            );
+        }
         let shift = FO::U32 as i32 - F::U32 as i32;
         let a = if shift >= 0 {
             (self.0 as i128) << shift
@@ -494,28 +579,21 @@ impl<I: Unsigned, F: Unsigned> UQ<I, F> {
     ///
     /// The full-precision product in `UQ<IO, FO>` format.
     ///
-    /// # Panics
+    /// # Compile-time checks
     ///
-    /// In debug mode, panics if `IO + FO < I + F + I2 + F2`.
+    /// Fails to compile if the output type is too narrow
+    /// (`IO + FO < I + F + I2 + F2`).
     #[inline]
     pub fn widening_mul<I2: Unsigned, F2: Unsigned, IO: Unsigned, FO: Unsigned>(
         self,
         rhs: UQ<I2, F2>,
     ) -> UQ<IO, FO> {
-        UQ::<I2, F2>::check();
-        UQ::<IO, FO>::check();
-        debug_assert!(
-            UQ::<IO, FO>::TOTAL_BITS >= Self::TOTAL_BITS + UQ::<I2, F2>::TOTAL_BITS,
-            "widening_mul: output UQ<{}, {}> ({} bits) too narrow for UQ<{}, {}> * UQ<{}, {}> ({} bits needed)",
-            IO::U32,
-            FO::U32,
-            UQ::<IO, FO>::TOTAL_BITS,
-            I::U32,
-            F::U32,
-            I2::U32,
-            F2::U32,
-            Self::TOTAL_BITS + UQ::<I2, F2>::TOTAL_BITS
-        );
+        const {
+            assert!(
+                UQ::<IO, FO>::TOTAL_BITS >= Self::TOTAL_BITS + UQ::<I2, F2>::TOTAL_BITS,
+                "widening_mul: output type too narrow to hold the full-width product"
+            );
+        }
         let product = self.0 as u128 * rhs.0 as u128;
         let frac_in = F::U32 + F2::U32;
         let shift = frac_in as i32 - FO::U32 as i32;

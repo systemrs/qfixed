@@ -4,6 +4,8 @@ use core::marker::PhantomData;
 
 use typenum::Unsigned;
 
+use crate::error::FixedError;
+
 /// Signed fixed-point number with `I` integer bits (including sign) and `F`
 /// fractional bits.
 ///
@@ -120,9 +122,10 @@ impl<I: Unsigned, F: Unsigned> Q<I, F> {
     /// Constructs from a raw bit pattern (the low `I + F` bits), sign-extending.
     ///
     /// `bits` is the unsigned two's-complement pattern as produced by
-    /// [`to_bits`](Self::to_bits), so this is its exact inverse for every
-    /// representable value (matching [`f64::from_bits`]). For the signed
-    /// numeric value, use [`from_count`](Self::from_count) instead.
+    /// [`to_bits`](Self::to_bits); any bits above the low `I + F` are **masked
+    /// off** (never panics), matching RTL register truncation. For a checked
+    /// conversion use [`try_from_bits`](Self::try_from_bits); for the signed
+    /// numeric value use [`from_count`](Self::from_count).
     ///
     /// # Arguments
     ///
@@ -131,18 +134,36 @@ impl<I: Unsigned, F: Unsigned> Q<I, F> {
     /// # Returns
     ///
     /// A new `Q<I, F>` holding the sign-extended value.
-    ///
-    /// # Panics
-    ///
-    /// In debug mode, panics if any bits above the low `I + F` are set.
     #[inline]
     pub const fn from_bits(bits: u64) -> Self {
-        Self::check();
-        debug_assert!(
-            bits == bits & Self::MASK,
-            "from_bits: bits set above the low I + F bits"
-        );
         Self::from_raw(bits as i64)
+    }
+
+    /// Constructs from a raw bit pattern, erroring if it does not fit.
+    ///
+    /// Like [`from_bits`](Self::from_bits) but returns
+    /// [`FixedError::OutOfRange`] instead of masking when `bits` sets any bit
+    /// above the low `I + F`.
+    ///
+    /// # Arguments
+    ///
+    /// * `bits` - The raw bit pattern.
+    ///
+    /// # Returns
+    ///
+    /// The reconstructed `Q<I, F>`, or [`FixedError::OutOfRange`] if `bits`
+    /// carries information outside the low `I + F` bits.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FixedError::OutOfRange`] if `bits != bits & MASK`.
+    #[inline]
+    pub const fn try_from_bits(bits: u64) -> Result<Self, FixedError> {
+        if bits == bits & Self::MASK {
+            Ok(Self::from_raw(bits as i64))
+        } else {
+            Err(FixedError::OutOfRange)
+        }
     }
 
     /// Extracts the raw bit pattern, masked to the low `I + F` bits.
@@ -198,10 +219,11 @@ impl<I: Unsigned, F: Unsigned> Q<I, F> {
     /// Constructs from a signed count of fractional LSB units.
     ///
     /// One count is `2^-F` (one LSB), so the resulting value is
-    /// `count * 2^-F` and `count` is exactly the signed two's-complement
-    /// register word. Lossless; the exact inverse of
-    /// [`to_count`](Self::to_count). To build a whole number use the
-    /// [`From`] conversions (e.g. `Q::from(3i32)`).
+    /// `count * 2^-F` and `count` is the signed two's-complement register
+    /// word. An out-of-range `count` is **wrapped** (masked to `I + F` bits,
+    /// like an RTL register) — it never panics. For a checked conversion use
+    /// [`try_from_count`](Self::try_from_count); to build a whole number use
+    /// the [`From`] conversions (e.g. `Q::from(3i32)`).
     ///
     /// # Arguments
     ///
@@ -209,19 +231,36 @@ impl<I: Unsigned, F: Unsigned> Q<I, F> {
     ///
     /// # Returns
     ///
-    /// A new `Q<I, F>` representing `count * 2^-F`.
-    ///
-    /// # Panics
-    ///
-    /// In debug mode, panics if `count` is outside `[MIN, MAX]` for this type.
+    /// A new `Q<I, F>` representing `count * 2^-F`, wrapped to range.
     #[inline]
     pub const fn from_count(count: i64) -> Self {
-        Self::check();
-        debug_assert!(
-            count >= Self::MIN.0 && count <= Self::MAX.0,
-            "from_count: value out of range for this Q type"
-        );
         Self::from_raw(count)
+    }
+
+    /// Constructs from a signed count of LSB units, erroring if out of range.
+    ///
+    /// Like [`from_count`](Self::from_count) but returns
+    /// [`FixedError::OutOfRange`] instead of wrapping when `count` is outside
+    /// `[MIN, MAX]`.
+    ///
+    /// # Arguments
+    ///
+    /// * `count` - The number of `2^-F` units.
+    ///
+    /// # Returns
+    ///
+    /// The `Q<I, F>` value, or [`FixedError::OutOfRange`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FixedError::OutOfRange`] if `count` is outside `[MIN, MAX]`.
+    #[inline]
+    pub const fn try_from_count(count: i64) -> Result<Self, FixedError> {
+        if count >= Self::MIN.0 && count <= Self::MAX.0 {
+            Ok(Self::from_raw(count))
+        } else {
+            Err(FixedError::OutOfRange)
+        }
     }
 
     /// Returns the value as a signed count of fractional LSB units.
@@ -248,13 +287,44 @@ impl<I: Unsigned, F: Unsigned> Q<I, F> {
     ///
     /// # Returns
     ///
-    /// A new `Q<I, F>` representing the quantized value.
+    /// A new `Q<I, F>` representing the quantized value. Out-of-range or
+    /// non-finite inputs produce a wrapped/saturated value rather than
+    /// panicking; use [`try_from_f64`](Self::try_from_f64) for a checked
+    /// conversion.
     #[inline]
     pub fn from_f64(val: f64) -> Self {
         Self::check();
         let scale = (1u64 << Self::FRACTIONAL_BITS) as f64;
         let raw = (val * scale) as i64;
         Self::from_raw(raw)
+    }
+
+    /// Constructs from `f64`, erroring on non-finite or out-of-range input.
+    ///
+    /// # Arguments
+    ///
+    /// * `val` - The floating-point value to quantize.
+    ///
+    /// # Returns
+    ///
+    /// The quantized `Q<I, F>` value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FixedError::NotFinite`] if `val` is NaN or infinite, or
+    /// [`FixedError::OutOfRange`] if it does not fit in `[MIN, MAX]`.
+    #[inline]
+    pub fn try_from_f64(val: f64) -> Result<Self, FixedError> {
+        Self::check();
+        if !val.is_finite() {
+            return Err(FixedError::NotFinite);
+        }
+        let scale = (1u64 << Self::FRACTIONAL_BITS) as f64;
+        let scaled = val * scale;
+        if scaled < Self::MIN.0 as f64 || scaled > Self::MAX.0 as f64 {
+            return Err(FixedError::OutOfRange);
+        }
+        Ok(Self::from_raw(scaled as i64))
     }
 
     /// Converts to `f64`.
@@ -377,16 +447,46 @@ impl<I: Unsigned, F: Unsigned> Q<I, F> {
     ///
     /// # Arguments
     ///
-    /// * `rhs` - The divisor (must not be zero).
+    /// * `rhs` - The divisor.
     ///
     /// # Returns
     ///
     /// The truncated quotient in the same `Q<I, F>` format.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `rhs` is zero (in all build profiles). Use
+    /// [`checked_div`](Self::checked_div) to handle a zero divisor.
     #[inline]
     pub const fn wrapping_div(self, rhs: Self) -> Self {
         let numer = (self.0 as i128) << Self::FRACTIONAL_BITS;
         let result = (numer / rhs.0 as i128) as i64;
         Self::from_raw(result)
+    }
+
+    /// Checked same-type divide: `(self << F) / rhs`, or `None` if `rhs` is
+    /// zero.
+    ///
+    /// The numerator is widened in 128 bits before division to preserve
+    /// fractional precision; the quotient is truncated to `I + F` bits.
+    ///
+    /// # Arguments
+    ///
+    /// * `rhs` - The divisor.
+    ///
+    /// # Returns
+    ///
+    /// `Some(quotient)` in the same `Q<I, F>` format, or `None` if `rhs` is
+    /// zero.
+    #[inline]
+    pub const fn checked_div(self, rhs: Self) -> Option<Self> {
+        if rhs.0 == 0 {
+            None
+        } else {
+            let numer = (self.0 as i128) << Self::FRACTIONAL_BITS;
+            let result = (numer / rhs.0 as i128) as i64;
+            Some(Self::from_raw(result))
+        }
     }
 
     /// Saturating addition: clamps to `[MIN, MAX]` on overflow.
@@ -501,24 +601,17 @@ impl<I: Unsigned, F: Unsigned> Q<I, F> {
     ///
     /// The exact sum in `Q<IO, FO>` format.
     ///
-    /// # Panics
+    /// # Compile-time checks
     ///
-    /// In debug mode, panics if `IO + FO < I + F + 1`.
+    /// Fails to compile if the output type is too narrow (`IO + FO <= I + F`).
     #[inline]
     pub fn widening_add<IO: Unsigned, FO: Unsigned>(self, rhs: Self) -> Q<IO, FO> {
-        Q::<IO, FO>::check();
-        debug_assert!(
-            Q::<IO, FO>::TOTAL_BITS > Self::TOTAL_BITS,
-            "widening_add: output Q<{}, {}> ({} bits) too narrow for Q<{}, {}> + Q<{}, {}> ({} bits needed)",
-            IO::U32,
-            FO::U32,
-            Q::<IO, FO>::TOTAL_BITS,
-            I::U32,
-            F::U32,
-            I::U32,
-            F::U32,
-            Self::TOTAL_BITS + 1
-        );
+        const {
+            assert!(
+                Q::<IO, FO>::TOTAL_BITS > Self::TOTAL_BITS,
+                "widening_add: output type too narrow (needs at least one more integer bit than the input)"
+            );
+        }
         let shift = FO::U32 as i32 - F::U32 as i32;
         let a = if shift >= 0 {
             (self.0 as i128) << shift
@@ -546,24 +639,17 @@ impl<I: Unsigned, F: Unsigned> Q<I, F> {
     ///
     /// The exact difference in `Q<IO, FO>` format.
     ///
-    /// # Panics
+    /// # Compile-time checks
     ///
-    /// In debug mode, panics if `IO + FO < I + F + 1`.
+    /// Fails to compile if the output type is too narrow (`IO + FO <= I + F`).
     #[inline]
     pub fn widening_sub<IO: Unsigned, FO: Unsigned>(self, rhs: Self) -> Q<IO, FO> {
-        Q::<IO, FO>::check();
-        debug_assert!(
-            Q::<IO, FO>::TOTAL_BITS > Self::TOTAL_BITS,
-            "widening_sub: output Q<{}, {}> ({} bits) too narrow for Q<{}, {}> - Q<{}, {}> ({} bits needed)",
-            IO::U32,
-            FO::U32,
-            Q::<IO, FO>::TOTAL_BITS,
-            I::U32,
-            F::U32,
-            I::U32,
-            F::U32,
-            Self::TOTAL_BITS + 1
-        );
+        const {
+            assert!(
+                Q::<IO, FO>::TOTAL_BITS > Self::TOTAL_BITS,
+                "widening_sub: output type too narrow (needs at least one more integer bit than the input)"
+            );
+        }
         let shift = FO::U32 as i32 - F::U32 as i32;
         let a = if shift >= 0 {
             (self.0 as i128) << shift
@@ -592,9 +678,10 @@ impl<I: Unsigned, F: Unsigned> Q<I, F> {
     ///
     /// The full-precision product in `Q<IO, FO>` format.
     ///
-    /// # Panics
+    /// # Compile-time checks
     ///
-    /// In debug mode, panics if `IO + FO < I + F + I2 + F2 - 1`.
+    /// Fails to compile if the output type is too narrow
+    /// (`IO + FO < I + F + I2 + F2 - 1`).
     ///
     /// # Examples
     ///
@@ -606,25 +693,27 @@ impl<I: Unsigned, F: Unsigned> Q<I, F> {
     /// let c: Q<U24, U8> = a.widening_mul(b);
     /// assert_eq!(c.to_f64(), 12.0);
     /// ```
+    ///
+    /// An output type that is too narrow fails to compile:
+    ///
+    /// ```compile_fail
+    /// # use qfixed::Q;
+    /// # use qfixed::typenum::{U4, U8};
+    /// let a = Q::<U8, U8>::from(2i32);
+    /// let b = Q::<U8, U8>::from(3i32);
+    /// let _c: Q<U4, U4> = a.widening_mul(b); // output too narrow
+    /// ```
     #[inline]
     pub fn widening_mul<I2: Unsigned, F2: Unsigned, IO: Unsigned, FO: Unsigned>(
         self,
         rhs: Q<I2, F2>,
     ) -> Q<IO, FO> {
-        Q::<I2, F2>::check();
-        Q::<IO, FO>::check();
-        debug_assert!(
-            Q::<IO, FO>::TOTAL_BITS >= Self::TOTAL_BITS + Q::<I2, F2>::TOTAL_BITS - 1,
-            "widening_mul: output Q<{}, {}> ({} bits) too narrow for Q<{}, {}> * Q<{}, {}> ({} bits needed)",
-            IO::U32,
-            FO::U32,
-            Q::<IO, FO>::TOTAL_BITS,
-            I::U32,
-            F::U32,
-            I2::U32,
-            F2::U32,
-            Self::TOTAL_BITS + Q::<I2, F2>::TOTAL_BITS - 1
-        );
+        const {
+            assert!(
+                Q::<IO, FO>::TOTAL_BITS >= Self::TOTAL_BITS + Q::<I2, F2>::TOTAL_BITS - 1,
+                "widening_mul: output type too narrow to hold the full-width product"
+            );
+        }
         let product = self.0 as i128 * rhs.0 as i128;
         let frac_in = F::U32 + F2::U32;
         let shift = frac_in as i32 - FO::U32 as i32;

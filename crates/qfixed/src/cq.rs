@@ -4,6 +4,7 @@ use core::ops::Add;
 
 use typenum::{Sum, U1, Unsigned};
 
+use crate::error::FixedError;
 use crate::q::Q;
 
 /// Signed complex fixed-point number: a real and imaginary `Q<I, F>` pair.
@@ -198,6 +199,82 @@ impl<I: Unsigned, F: Unsigned> CQ<I, F> {
             re: Q::<I, F>::from_f64(re),
             im: Q::<I, F>::from_f64(im),
         }
+    }
+
+    /// Constructs from component bit patterns, erroring if either does not fit.
+    ///
+    /// Componentwise [`Q::try_from_bits`].
+    ///
+    /// # Arguments
+    ///
+    /// * `re` - The real-part bit pattern.
+    /// * `im` - The imaginary-part bit pattern.
+    ///
+    /// # Returns
+    ///
+    /// The reconstructed `CQ<I, F>`, or [`FixedError::OutOfRange`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FixedError::OutOfRange`] if either value sets bits above the
+    /// low `I + F`.
+    #[inline]
+    pub fn try_from_bits(re: u64, im: u64) -> Result<Self, FixedError> {
+        Ok(Self {
+            re: Q::<I, F>::try_from_bits(re)?,
+            im: Q::<I, F>::try_from_bits(im)?,
+        })
+    }
+
+    /// Constructs from component LSB counts, erroring if either is out of range.
+    ///
+    /// Componentwise [`Q::try_from_count`].
+    ///
+    /// # Arguments
+    ///
+    /// * `re` - The real-part count of `2^-F` units.
+    /// * `im` - The imaginary-part count of `2^-F` units.
+    ///
+    /// # Returns
+    ///
+    /// The `CQ<I, F>` value, or [`FixedError::OutOfRange`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FixedError::OutOfRange`] if either count is outside
+    /// `[MIN, MAX]`.
+    #[inline]
+    pub fn try_from_count(re: i64, im: i64) -> Result<Self, FixedError> {
+        Ok(Self {
+            re: Q::<I, F>::try_from_count(re)?,
+            im: Q::<I, F>::try_from_count(im)?,
+        })
+    }
+
+    /// Constructs from `f64` components, erroring on non-finite or
+    /// out-of-range input.
+    ///
+    /// Componentwise [`Q::try_from_f64`].
+    ///
+    /// # Arguments
+    ///
+    /// * `re` - The real part.
+    /// * `im` - The imaginary part.
+    ///
+    /// # Returns
+    ///
+    /// The quantized `CQ<I, F>` value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FixedError::NotFinite`] if either component is NaN or
+    /// infinite, or [`FixedError::OutOfRange`] if either does not fit.
+    #[inline]
+    pub fn try_from_f64(re: f64, im: f64) -> Result<Self, FixedError> {
+        Ok(Self {
+            re: Q::<I, F>::try_from_f64(re)?,
+            im: Q::<I, F>::try_from_f64(im)?,
+        })
     }
 
     /// Wrapping addition (componentwise, always wraps).

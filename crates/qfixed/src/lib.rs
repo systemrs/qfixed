@@ -66,6 +66,7 @@
 
 mod convert;
 mod cq;
+mod error;
 mod fmt;
 mod ops;
 mod q;
@@ -74,6 +75,7 @@ mod serde_impl;
 mod uq;
 
 pub use cq::CQ;
+pub use error::FixedError;
 pub use q::Q;
 pub use uq::UQ;
 
