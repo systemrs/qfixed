@@ -23,6 +23,7 @@ use core::ops;
 
 use typenum::{Sum, U1, Unsigned};
 
+use crate::cq::CQ;
 use crate::q::Q;
 use crate::uq::UQ;
 
@@ -444,5 +445,275 @@ impl<I: Unsigned, F: Unsigned> ops::BitOr for UQ<I, F> {
     #[inline]
     fn bitor(self, rhs: Self) -> Self {
         Self::from_raw(self.raw() | rhs.raw())
+    }
+}
+
+// ===========================================================================
+// CQ<I, F>
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// CQ<I, F>: Add
+// ---------------------------------------------------------------------------
+
+impl<I, F> ops::Add for CQ<I, F>
+where
+    I: Unsigned + ops::Add<U1>,
+    F: Unsigned,
+    Sum<I, U1>: Unsigned,
+{
+    type Output = CQ<Sum<I, U1>, F>;
+
+    /// Adds two `CQ<I, F>` values, producing `CQ<Sum<I, U1>, F>`.
+    ///
+    /// The extra integer bit guarantees no overflow.
+    ///
+    /// # Arguments
+    ///
+    /// * `rhs` - The right-hand operand.
+    ///
+    /// # Returns
+    ///
+    /// The exact sum as `CQ<Sum<I, U1>, F>`.
+    #[inline]
+    fn add(self, rhs: Self) -> Self::Output {
+        CQ {
+            re: self.re + rhs.re,
+            im: self.im + rhs.im,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CQ<I, F>: Sub
+// ---------------------------------------------------------------------------
+
+impl<I, F> ops::Sub for CQ<I, F>
+where
+    I: Unsigned + ops::Add<U1>,
+    F: Unsigned,
+    Sum<I, U1>: Unsigned,
+{
+    type Output = CQ<Sum<I, U1>, F>;
+
+    /// Subtracts two `CQ<I, F>` values, producing `CQ<Sum<I, U1>, F>`.
+    ///
+    /// The extra integer bit guarantees no overflow.
+    ///
+    /// # Arguments
+    ///
+    /// * `rhs` - The right-hand operand.
+    ///
+    /// # Returns
+    ///
+    /// The exact difference as `CQ<Sum<I, U1>, F>`.
+    #[inline]
+    fn sub(self, rhs: Self) -> Self::Output {
+        CQ {
+            re: self.re - rhs.re,
+            im: self.im - rhs.im,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CQ<I, F>: Neg
+// ---------------------------------------------------------------------------
+
+impl<I, F> ops::Neg for CQ<I, F>
+where
+    I: Unsigned + ops::Add<U1>,
+    F: Unsigned,
+    Sum<I, U1>: Unsigned,
+{
+    type Output = CQ<Sum<I, U1>, F>;
+
+    /// Negates a `CQ<I, F>` value, producing `CQ<Sum<I, U1>, F>`.
+    ///
+    /// The extra integer bit handles the `MIN` case without wrapping.
+    ///
+    /// # Returns
+    ///
+    /// The exact negation as `CQ<Sum<I, U1>, F>`.
+    #[inline]
+    fn neg(self) -> Self::Output {
+        CQ {
+            re: -self.re,
+            im: -self.im,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CQ<I, F>: Mul (complex)
+// ---------------------------------------------------------------------------
+
+impl<I, F> ops::Mul for CQ<I, F>
+where
+    I: Unsigned + ops::Add<I>,
+    F: Unsigned + ops::Add<F>,
+    Sum<I, I>: Unsigned + ops::Add<U1>,
+    Sum<Sum<I, I>, U1>: Unsigned,
+    Sum<F, F>: Unsigned,
+{
+    type Output = CQ<Sum<Sum<I, I>, U1>, Sum<F, F>>;
+
+    /// Multiplies two `CQ<I, F>` values: `(ac - bd) + (ad + bc)i`.
+    ///
+    /// Produces `CQ<Sum<Sum<I, I>, U1>, Sum<F, F>>` — one integer bit wider
+    /// than a real multiply, because each component is a sum or difference of
+    /// two full products. The result cannot overflow; use `.truncate()` or
+    /// `.saturate()` to narrow it.
+    ///
+    /// # Arguments
+    ///
+    /// * `rhs` - The right-hand operand.
+    ///
+    /// # Returns
+    ///
+    /// The exact product as `CQ<Sum<Sum<I, I>, U1>, Sum<F, F>>`.
+    #[inline]
+    fn mul(self, rhs: Self) -> Self::Output {
+        let re = self.re.raw() as i128 * rhs.re.raw() as i128
+            - self.im.raw() as i128 * rhs.im.raw() as i128;
+        let im = self.re.raw() as i128 * rhs.im.raw() as i128
+            + self.im.raw() as i128 * rhs.re.raw() as i128;
+        CQ {
+            re: Q::<Sum<Sum<I, I>, U1>, Sum<F, F>>::from_raw(re as i64),
+            im: Q::<Sum<Sum<I, I>, U1>, Sum<F, F>>::from_raw(im as i64),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CQ<I, F>: scalar Mul by Q (CQ * Q and Q * CQ)
+// ---------------------------------------------------------------------------
+
+impl<I, F> ops::Mul<Q<I, F>> for CQ<I, F>
+where
+    I: Unsigned + ops::Add<I>,
+    F: Unsigned + ops::Add<F>,
+    Sum<I, I>: Unsigned,
+    Sum<F, F>: Unsigned,
+{
+    type Output = CQ<Sum<I, I>, Sum<F, F>>;
+
+    /// Scales a complex value by a real `Q<I, F>`, producing
+    /// `CQ<Sum<I, I>, Sum<F, F>>`.
+    ///
+    /// Unlike complex × complex, no extra integer bit is needed: each
+    /// component is a single full product.
+    ///
+    /// # Arguments
+    ///
+    /// * `rhs` - The real scalar.
+    ///
+    /// # Returns
+    ///
+    /// The scaled value as `CQ<Sum<I, I>, Sum<F, F>>`.
+    #[inline]
+    fn mul(self, rhs: Q<I, F>) -> Self::Output {
+        CQ {
+            re: self.re * rhs,
+            im: self.im * rhs,
+        }
+    }
+}
+
+impl<I, F> ops::Mul<CQ<I, F>> for Q<I, F>
+where
+    I: Unsigned + ops::Add<I>,
+    F: Unsigned + ops::Add<F>,
+    Sum<I, I>: Unsigned,
+    Sum<F, F>: Unsigned,
+{
+    type Output = CQ<Sum<I, I>, Sum<F, F>>;
+
+    /// Scales a complex value by a real `Q<I, F>` from the left, producing
+    /// `CQ<Sum<I, I>, Sum<F, F>>`.
+    ///
+    /// # Arguments
+    ///
+    /// * `rhs` - The complex operand.
+    ///
+    /// # Returns
+    ///
+    /// The scaled value as `CQ<Sum<I, I>, Sum<F, F>>`.
+    #[inline]
+    fn mul(self, rhs: CQ<I, F>) -> Self::Output {
+        CQ {
+            re: self * rhs.re,
+            im: self * rhs.im,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CQ<I, F>: Shl, Shr (componentwise)
+// ---------------------------------------------------------------------------
+
+impl<I: Unsigned, F: Unsigned> ops::Shl<u32> for CQ<I, F> {
+    type Output = Self;
+
+    /// Shifts both components left by `shift` bits.
+    ///
+    /// # Arguments
+    ///
+    /// * `shift` - Number of bits to shift left.
+    ///
+    /// # Returns
+    ///
+    /// The shifted value, each component masked to the bit width.
+    #[inline]
+    fn shl(self, shift: u32) -> Self {
+        Self {
+            re: self.re << shift,
+            im: self.im << shift,
+        }
+    }
+}
+
+impl<I: Unsigned, F: Unsigned> ops::ShlAssign<u32> for CQ<I, F> {
+    /// Shifts both components left in place.
+    ///
+    /// # Arguments
+    ///
+    /// * `shift` - Number of bits to shift left.
+    #[inline]
+    fn shl_assign(&mut self, shift: u32) {
+        *self = *self << shift;
+    }
+}
+
+impl<I: Unsigned, F: Unsigned> ops::Shr<u32> for CQ<I, F> {
+    type Output = Self;
+
+    /// Arithmetic right shift (sign-preserving) of both components.
+    ///
+    /// # Arguments
+    ///
+    /// * `shift` - Number of bits to shift right.
+    ///
+    /// # Returns
+    ///
+    /// The shifted value with sign extension on each component.
+    #[inline]
+    fn shr(self, shift: u32) -> Self {
+        Self {
+            re: self.re >> shift,
+            im: self.im >> shift,
+        }
+    }
+}
+
+impl<I: Unsigned, F: Unsigned> ops::ShrAssign<u32> for CQ<I, F> {
+    /// Shifts both components right in place (arithmetic / sign-preserving).
+    ///
+    /// # Arguments
+    ///
+    /// * `shift` - Number of bits to shift right.
+    #[inline]
+    fn shr_assign(&mut self, shift: u32) {
+        *self = *self >> shift;
     }
 }

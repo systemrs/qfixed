@@ -143,34 +143,47 @@ impl<I: Unsigned, F: Unsigned> UQ<I, F> {
         Self(raw & Self::MASK, PhantomData)
     }
 
-    /// Constructs from an integer value by shifting left by `F`.
+    /// Constructs from a count of fractional LSB units.
+    ///
+    /// One count is `2^-F` (one LSB), so the resulting value is
+    /// `count * 2^-F` and `count` is exactly the raw register word. Lossless;
+    /// the exact inverse of [`to_count`](Self::to_count). To build a whole
+    /// number use the [`From`] conversions (e.g. `UQ::from(3u32)`).
     ///
     /// # Arguments
     ///
-    /// * `val` - The integer to convert.
+    /// * `count` - The number of `2^-F` units.
     ///
     /// # Returns
     ///
-    /// A new `UQ<I, F>` representing `val` as a fixed-point value.
+    /// A new `UQ<I, F>` representing `count * 2^-F`.
     ///
     /// # Panics
     ///
-    /// In debug mode, panics if `val` does not fit in `I` integer bits.
+    /// In debug mode, panics if `count` exceeds `MAX` for this type.
     #[inline]
-    pub const fn from_int(val: u64) -> Self {
+    pub const fn from_count(count: u64) -> Self {
         Self::check();
-        let shifted = val << Self::FRACTIONAL_BITS;
-        Self::from_bits(shifted)
+        debug_assert!(
+            count <= Self::MAX.0,
+            "from_count: value out of range for this UQ type"
+        );
+        Self::from_raw(count)
     }
 
-    /// Extracts the integer part, truncating toward zero.
+    /// Returns the value as a count of fractional LSB units.
+    ///
+    /// One count is `2^-F` (one LSB), so this returns `value * 2^F` — the raw
+    /// register word. Lossless; the exact inverse of
+    /// [`from_count`](Self::from_count). Equal to [`to_bits`](Self::to_bits)
+    /// for unsigned values.
     ///
     /// # Returns
     ///
-    /// The integer portion of the fixed-point value.
+    /// The count of `2^-F` units.
     #[inline]
-    pub const fn to_int(self) -> u64 {
-        self.0 >> Self::FRACTIONAL_BITS
+    pub const fn to_count(self) -> u64 {
+        self.0
     }
 
     /// Constructs from `f64` by quantizing to the nearest representable

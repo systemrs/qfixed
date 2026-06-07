@@ -2,6 +2,7 @@
 
 use typenum::Unsigned;
 
+use crate::cq::CQ;
 use crate::q::Q;
 use crate::uq::UQ;
 
@@ -246,10 +247,10 @@ macro_rules! impl_from_signed_int {
     ($($int:ty),*) => {
         $(
             impl<I: Unsigned, F: Unsigned> From<$int> for Q<I, F> {
-                /// Converts an integer to `Q<I, F>` by shifting left by `F`.
+                /// Converts a whole number to `Q<I, F>` by shifting left by `F`.
                 #[inline]
                 fn from(val: $int) -> Self {
-                    Self::from_int(val as i64)
+                    Self::from_count((val as i64) << Self::FRACTIONAL_BITS)
                 }
             }
         )*
@@ -266,11 +267,10 @@ macro_rules! impl_from_unsigned_int {
     ($($int:ty),*) => {
         $(
             impl<I: Unsigned, F: Unsigned> From<$int> for UQ<I, F> {
-                /// Converts an unsigned integer to `UQ<I, F>` by shifting
-                /// left by `F`.
+                /// Converts a whole number to `UQ<I, F>` by shifting left by `F`.
                 #[inline]
                 fn from(val: $int) -> Self {
-                    Self::from_int(val as u64)
+                    Self::from_count((val as u64) << Self::FRACTIONAL_BITS)
                 }
             }
         )*
@@ -278,3 +278,66 @@ macro_rules! impl_from_unsigned_int {
 }
 
 impl_from_unsigned_int!(u8, u16, u32, u64);
+
+// ---------------------------------------------------------------------------
+// CQ<I, F>: widen, truncate, saturate, reformat (componentwise)
+// ---------------------------------------------------------------------------
+
+impl<I: Unsigned, F: Unsigned> CQ<I, F> {
+    /// Lossless widening of both components to a larger `CQ` type.
+    ///
+    /// # Returns
+    ///
+    /// The same value in `CQ<IO, FO>` format.
+    ///
+    /// # Panics
+    ///
+    /// In debug mode, panics if `IO < I` or `FO < F`.
+    #[inline]
+    pub fn widen<IO: Unsigned, FO: Unsigned>(self) -> CQ<IO, FO> {
+        CQ {
+            re: self.re.widen(),
+            im: self.im.widen(),
+        }
+    }
+
+    /// Narrowing conversion of both components with truncation toward zero.
+    ///
+    /// # Returns
+    ///
+    /// The truncated value in `CQ<IO, FO>` format.
+    #[inline]
+    pub fn truncate<IO: Unsigned, FO: Unsigned>(self) -> CQ<IO, FO> {
+        CQ {
+            re: self.re.truncate(),
+            im: self.im.truncate(),
+        }
+    }
+
+    /// Narrowing conversion of both components with saturation.
+    ///
+    /// # Returns
+    ///
+    /// The value with each component clamped to fit in `CQ<IO, FO>`.
+    #[inline]
+    pub fn saturate<IO: Unsigned, FO: Unsigned>(self) -> CQ<IO, FO> {
+        CQ {
+            re: self.re.saturate(),
+            im: self.im.saturate(),
+        }
+    }
+
+    /// General-purpose format conversion of both components.
+    ///
+    /// # Returns
+    ///
+    /// The value in `CQ<IO, FO>` format, with each fractional point shifted
+    /// accordingly.
+    #[inline]
+    pub fn reformat<IO: Unsigned, FO: Unsigned>(self) -> CQ<IO, FO> {
+        CQ {
+            re: self.re.reformat(),
+            im: self.im.reformat(),
+        }
+    }
+}

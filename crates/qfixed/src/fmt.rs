@@ -24,6 +24,7 @@ use core::fmt::{self, Write};
 
 use typenum::Unsigned;
 
+use crate::cq::CQ;
 use crate::q::Q;
 use crate::uq::UQ;
 
@@ -152,7 +153,7 @@ impl<I: Unsigned, F: Unsigned> fmt::LowerHex for Q<I, F> {
     /// The raw bit pattern in lowercase hex, zero-padded to the type width;
     /// `#` adds the `0x` prefix.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt_radix(self.to_bits() as u64, Self::TOTAL_BITS, f, Radix::LowerHex)
+        fmt_radix(self.to_bits(), Self::TOTAL_BITS, f, Radix::LowerHex)
     }
 }
 
@@ -160,7 +161,7 @@ impl<I: Unsigned, F: Unsigned> fmt::UpperHex for Q<I, F> {
     /// The raw bit pattern in uppercase hex, zero-padded to the type width;
     /// `#` adds the `0x` prefix.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt_radix(self.to_bits() as u64, Self::TOTAL_BITS, f, Radix::UpperHex)
+        fmt_radix(self.to_bits(), Self::TOTAL_BITS, f, Radix::UpperHex)
     }
 }
 
@@ -168,7 +169,7 @@ impl<I: Unsigned, F: Unsigned> fmt::Binary for Q<I, F> {
     /// The raw bit pattern in binary, zero-padded to the full type width;
     /// `#` adds the `0b` prefix.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt_radix(self.to_bits() as u64, Self::TOTAL_BITS, f, Radix::Binary)
+        fmt_radix(self.to_bits(), Self::TOTAL_BITS, f, Radix::Binary)
     }
 }
 
@@ -176,7 +177,7 @@ impl<I: Unsigned, F: Unsigned> fmt::Octal for Q<I, F> {
     /// The raw bit pattern in octal, zero-padded to the type width;
     /// `#` adds the `0o` prefix.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt_radix(self.to_bits() as u64, Self::TOTAL_BITS, f, Radix::Octal)
+        fmt_radix(self.to_bits(), Self::TOTAL_BITS, f, Radix::Octal)
     }
 }
 
@@ -280,5 +281,55 @@ impl<I: Unsigned, F: Unsigned> fmt::UpperExp for UQ<I, F> {
     /// Scientific decimal of the value (delegated to `f64`); honors precision.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::UpperExp::fmt(&self.to_f64(), f)
+    }
+}
+
+impl<I: Unsigned, F: Unsigned> fmt::Display for CQ<I, F> {
+    /// Displays the complex value as `re±imj` (e.g. `1.5-2.25j`).
+    ///
+    /// Precision is honored on both components; the imaginary part always
+    /// carries an explicit sign so the two halves are unambiguous.
+    ///
+    /// # Arguments
+    ///
+    /// * `f` - The formatter to write to.
+    ///
+    /// # Returns
+    ///
+    /// A `fmt::Result` indicating success or formatting error.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let re = self.re.to_f64();
+        let im = self.im.to_f64();
+        match f.precision() {
+            Some(p) => write!(f, "{re:.p$}{im:+.p$}j"),
+            None => write!(f, "{re}{im:+}j"),
+        }
+    }
+}
+
+impl<I: Unsigned, F: Unsigned> fmt::Debug for CQ<I, F> {
+    /// Formats as `CQ8.8(0x0180, 0xfe80 = 1.5-1.5j)`: the CQ tag, the raw
+    /// two's-complement register words for the real and imaginary parts in
+    /// hex (each zero-padded to the type width), and the value.
+    ///
+    /// # Arguments
+    ///
+    /// * `f` - The formatter to write to.
+    ///
+    /// # Returns
+    ///
+    /// A `fmt::Result` indicating success or formatting error.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let i = I::U32;
+        let frac = F::U32;
+        let w = (i + frac).div_ceil(4) as usize;
+        let re_bits = self.re.to_bits();
+        let im_bits = self.im.to_bits();
+        let re = self.re.to_f64();
+        let im = self.im.to_f64();
+        write!(
+            f,
+            "CQ{i}.{frac}(0x{re_bits:0>w$x}, 0x{im_bits:0>w$x} = {re}{im:+}j)"
+        )
     }
 }

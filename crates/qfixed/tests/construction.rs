@@ -14,29 +14,73 @@ fn q_from_bits_roundtrip() {
     assert_eq!(v.to_bits(), 0x0108);
 }
 
-/// Verifies negative values in Q4.4 are correctly stored and extracted.
+/// Verifies a negative value's bit pattern is stored and extracted correctly.
 #[test]
 fn q_negative_from_bits() {
-    // Q4.4: 8-bit signed, value -1.0 = 0xF0 in 8 bits
-    let v = Q::<U4, U4>::from_bits(-16); // -1.0 in Q4.4 = -16 raw
-    assert_eq!(v.to_bits(), 0xF0); // 8-bit representation
-    assert_eq!(v.to_int(), -1);
+    // Q4.4: 8-bit signed, value -1.0 has bit pattern 0xF0 (count -16).
+    let v = Q::<U4, U4>::from_bits(0xF0);
+    assert_eq!(v.to_bits(), 0xF0);
+    assert_eq!(v.to_count(), -16);
 }
 
-/// Verifies sign extension works for all-bits-set values.
+/// Verifies sign extension works for all-bits-set patterns.
 #[test]
 fn q_sign_extension() {
-    // Q4.4: -1 raw should sign-extend. Pass as sign-extended i64.
-    let v = Q::<U4, U4>::from_bits(-1); // All bits set = -0.0625
-    assert_eq!(v.to_bits(), 0xFF); // 8-bit representation: all bits set
+    // Q4.4: all bits set (0xFF) = -0.0625.
+    let v = Q::<U4, U4>::from_bits(0xFF);
+    assert_eq!(v.to_bits(), 0xFF);
+    assert_eq!(v.to_count(), -1);
 }
 
-/// Verifies `from_int` sets the integer part and `to_int` recovers it.
+/// Verifies `from_bits(to_bits(x)) == x` for signed values of both signs.
+///
+/// `to_bits` returns the unsigned bit pattern, so for negative values it reads
+/// back as a large positive; `from_bits` must invert that. Values are built
+/// with `from_count` (the signed LSB-count view).
 #[test]
-fn q_from_int() {
-    let v = Q::<U12, U4>::from_int(42);
-    assert_eq!(v.to_int(), 42);
-    assert_eq!(v.to_bits(), 42 << 4);
+fn q_bits_roundtrip_signed_values() {
+    // Q8.8 is 16-bit: count range [-32768, 32767].
+    for &count in &[-32768i64, -1000, -256, -16, -1, 0, 1, 16, 256, 1000, 32767] {
+        let x = Q::<U8, U8>::from_count(count);
+        assert_eq!(
+            Q::<U8, U8>::from_bits(x.to_bits()),
+            x,
+            "round-trip failed for count {count}"
+        );
+    }
+}
+
+/// Verifies the unsigned `from_bits` and the signed `from_count` agree.
+#[test]
+fn q_from_bits_matches_from_count() {
+    // Q4.4: -1.0 is count -16, whose 8-bit pattern is 0xF0.
+    assert_eq!(Q::<U4, U4>::from_bits(0xF0), Q::<U4, U4>::from_count(-16));
+    assert_eq!(Q::<U4, U4>::from_bits(0xF0).to_count(), -16);
+}
+
+/// Verifies the bit round-trip at full 64-bit width (no masking path).
+#[test]
+fn q_bits_roundtrip_full_width() {
+    let x = Q::<U32, U32>::from(-5i32);
+    assert_eq!(Q::<U32, U32>::from_bits(x.to_bits()), x);
+}
+
+/// Verifies whole-number construction via `From` and the LSB-count view.
+#[test]
+fn q_from_whole_number() {
+    let v = Q::<U12, U4>::from(42i32);
+    assert_eq!(v.to_f64(), 42.0);
+    assert_eq!(v.to_count(), 42 << 4); // 42 units of 1/16
+    assert_eq!(v.to_bits(), 42u64 << 4);
+}
+
+/// Verifies `from_count` builds a fractional value from a count of LSB units.
+#[test]
+fn q_from_count_fractional() {
+    // Q4.4: one count is 1/16, so 56 counts = 3.5.
+    let v = Q::<U4, U4>::from_count(56);
+    assert_eq!(v.to_f64(), 3.5);
+    assert_eq!(v.to_count(), 56);
 }
 
 /// Verifies `from_f64` quantizes 16.5 to the correct Q12.4 bits.
@@ -59,7 +103,7 @@ fn q_constants() {
     assert_eq!(Q::<U12, U4>::ZERO.to_bits(), 0);
     assert_eq!(Q::<U12, U4>::ONE.to_bits(), 16); // 1.0 in Q12.4 = 16
     assert_eq!(Q::<U12, U4>::MAX.to_bits(), 0x7FFF); // 15-bit max
-    assert_eq!(Q::<U12, U4>::MIN.to_int(), -(1i64 << 11)); // -2048
+    assert_eq!(Q::<U12, U4>::MIN.to_f64(), -2048.0); // -2^(I-1)
 }
 
 // ---------------------------------------------------------------------------
@@ -70,23 +114,23 @@ fn q_constants() {
 /// coefficients from the RTL rasterizer.
 #[test]
 fn q_11bit_edge_coeff() {
-    let a = Q::<U11, U0>::from_int(500);
-    let b = Q::<U11, U0>::from_int(-300);
-    assert_eq!(a.to_int(), 500);
-    assert_eq!(b.to_int(), -300);
-    assert_eq!((a + b).to_int(), 200);
+    let a = Q::<U11, U0>::from(500i32);
+    let b = Q::<U11, U0>::from(-300i32);
+    assert_eq!(a.to_count(), 500); // F = 0, so count == integer value
+    assert_eq!(b.to_count(), -300);
+    assert_eq!((a + b).to_count(), 200);
 
-    assert_eq!(Q::<U11, U0>::MAX.to_int(), 1023);
-    assert_eq!(Q::<U11, U0>::MIN.to_int(), -1024);
+    assert_eq!(Q::<U11, U0>::MAX.to_count(), 1023);
+    assert_eq!(Q::<U11, U0>::MIN.to_count(), -1024);
 }
 
 /// Verifies Q21.0 (21-bit signed integer) for edge function C
 /// coefficients.
 #[test]
 fn q_21bit_edge_constant() {
-    let a = Q::<U21, U0>::from_int(100_000);
-    let b = Q::<U21, U0>::from_int(-50_000);
-    assert_eq!((a + b).to_int(), 50_000);
+    let a = Q::<U21, U0>::from(100_000i32);
+    let b = Q::<U21, U0>::from(-50_000i32);
+    assert_eq!((a + b).to_count(), 50_000);
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +142,21 @@ fn q_21bit_edge_constant() {
 fn uq_from_bits_roundtrip() {
     let v = UQ::<U4, U14>::from_bits(0x1234);
     assert_eq!(v.to_bits(), 0x1234);
+}
+
+/// Verifies `from_bits(to_bits(x)) == x` for UQ values, including the
+/// high-bit-set patterns that exercise the masking path.
+#[test]
+fn uq_bits_roundtrip_values() {
+    // UQ4.4 is 8-bit: count range [0, 255].
+    for &count in &[0u64, 1, 0x0F, 0x80, 0xC8, 0xFF] {
+        let x = UQ::<U4, U4>::from_count(count);
+        assert_eq!(
+            UQ::<U4, U4>::from_bits(x.to_bits()),
+            x,
+            "round-trip failed for count {count}"
+        );
+    }
 }
 
 /// Verifies ZERO, ONE, and MAX constants for UQ1.7.
@@ -126,8 +185,8 @@ fn uq_18bit_reciprocal() {
 /// Use `wrapping_add` for same-type addition at maximum width.
 #[test]
 fn q_64bit_full() {
-    let a = Q::<U32, U32>::from_int(1);
-    let b = Q::<U32, U32>::from_int(2);
+    let a = Q::<U32, U32>::from(1i32);
+    let b = Q::<U32, U32>::from(2i32);
     let c = a.wrapping_add(b);
-    assert_eq!(c.to_int(), 3);
+    assert_eq!(c.to_f64(), 3.0);
 }

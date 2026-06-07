@@ -27,7 +27,7 @@ fn q_truncate() {
 /// Verifies saturation clamps positive overflow to MAX.
 #[test]
 fn q_saturate() {
-    let a = Q::<U16, U16>::from_int(1000);
+    let a = Q::<U16, U16>::from(1000i32);
     let b: Q<U4, U4> = a.saturate();
     assert_eq!(b, Q::<U4, U4>::MAX);
 }
@@ -35,7 +35,7 @@ fn q_saturate() {
 /// Verifies saturation clamps negative overflow to MIN.
 #[test]
 fn q_saturate_negative() {
-    let a = Q::<U16, U16>::from_int(-1000);
+    let a = Q::<U16, U16>::from(-1000i32);
     let b: Q<U4, U4> = a.saturate();
     assert_eq!(b, Q::<U4, U4>::MIN);
 }
@@ -64,7 +64,7 @@ fn q_to_unsigned() {
 /// Verifies negative Q values clamp to UQ::ZERO on unsigned conversion.
 #[test]
 fn q_to_unsigned_clamps_negative() {
-    let v = Q::<U4, U12>::from_int(-1);
+    let v = Q::<U4, U12>::from(-1i32);
     let u: UQ<U4, U12> = v.to_unsigned();
     assert_eq!(u, UQ::<U4, U12>::ZERO);
 }
@@ -77,14 +77,14 @@ fn q_to_unsigned_clamps_negative() {
 #[test]
 fn q_from_i32() {
     let v: Q<U16, U16> = Q::from(42i32);
-    assert_eq!(v.to_int(), 42);
+    assert_eq!(v.to_f64(), 42.0);
 }
 
 /// Verifies `From<u8>` for UQ8.8.
 #[test]
 fn uq_from_u8() {
     let v: UQ<U8, U8> = UQ::from(5u8);
-    assert_eq!(v.to_int(), 5);
+    assert_eq!(v.to_f64(), 5.0);
 }
 
 // ---------------------------------------------------------------------------

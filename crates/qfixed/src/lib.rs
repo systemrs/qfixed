@@ -6,6 +6,14 @@
 //! unsigned integers (`U0`, `U1`, `U8`, …), e.g. `Q<U12, U4>`.
 //! Total bit width is `I + F`, backed by `i64`/`u64` internally.
 //!
+//! `CQ<I, F>` is a signed complex type — a real/imaginary `Q<I, F>` pair —
+//! for bit-accurate modeling of IQ-sample and complex datapaths. Complex
+//! multiply grows by one integer bit more than a real multiply, since each
+//! component is a sum or difference of two products:
+//! - `CQ<I,F> + CQ<I,F>` → `CQ<Sum<I, U1>, F>`
+//! - `CQ<I,F> * CQ<I,F>` → `CQ<Sum<Sum<I, I>, U1>, Sum<F, F>>`
+//! - `CQ<I,F> * Q<I,F>` (scalar) → `CQ<Sum<I, I>, Sum<F, F>>`
+//!
 //! Arithmetic operators produce widened outputs that cannot overflow. The
 //! output widths are computed at the type level with `typenum` (`Sum<I, U1>` is
 //! `I + 1`, `Sum<I, I>` is `2 * I`), so this works on stable Rust:
@@ -24,10 +32,10 @@
 //! use qfixed::Q;
 //! use qfixed::typenum::{U4, U12};
 //!
-//! let a = Q::<U12, U4>::from_int(3);
-//! let b = Q::<U12, U4>::from_int(4);
+//! let a = Q::<U12, U4>::from(3i32);
+//! let b = Q::<U12, U4>::from(4i32);
 //! let sum = a + b; // Q<U13, U4> — one extra integer bit, cannot overflow
-//! assert_eq!(sum.to_int(), 7);
+//! assert_eq!(sum.to_f64(), 7.0);
 //! ```
 
 #![no_std]
@@ -57,6 +65,7 @@
 #![allow(unused_crate_dependencies)]
 
 mod convert;
+mod cq;
 mod fmt;
 mod ops;
 mod q;
@@ -64,6 +73,7 @@ mod q;
 mod serde_impl;
 mod uq;
 
+pub use cq::CQ;
 pub use q::Q;
 pub use uq::UQ;
 

@@ -117,51 +117,47 @@ impl<I: Unsigned, F: Unsigned> Q<I, F> {
         }
     }
 
-    /// Constructs from a raw bit representation.
+    /// Constructs from a raw bit pattern (the low `I + F` bits), sign-extending.
     ///
-    /// The value is masked to `I + F` bits and sign-extended.
+    /// `bits` is the unsigned two's-complement pattern as produced by
+    /// [`to_bits`](Self::to_bits), so this is its exact inverse for every
+    /// representable value (matching [`f64::from_bits`]). For the signed
+    /// numeric value, use [`from_count`](Self::from_count) instead.
     ///
     /// # Arguments
     ///
-    /// * `raw` - The raw fixed-point value, sign-extended to i64.
+    /// * `bits` - The raw bit pattern; only the low `I + F` bits are used.
     ///
     /// # Returns
     ///
-    /// A new `Q<I, F>` holding the masked, sign-extended value.
+    /// A new `Q<I, F>` holding the sign-extended value.
     ///
     /// # Panics
     ///
-    /// In debug mode, panics if `raw` does not already fit in
-    /// `I + F` bits (i.e., truncation would change the value).
+    /// In debug mode, panics if any bits above the low `I + F` are set.
     #[inline]
-    pub const fn from_bits(raw: i64) -> Self {
+    pub const fn from_bits(bits: u64) -> Self {
         Self::check();
-        let masked = if Self::TOTAL_BITS >= 64 {
-            raw
-        } else {
-            let m = (raw as u64) & Self::MASK;
-            Self::sign_extend(m as i64)
-        };
         debug_assert!(
-            raw == masked,
-            "from_bits: value out of range for this Q type"
+            bits == bits & Self::MASK,
+            "from_bits: bits set above the low I + F bits"
         );
-        Self(masked, PhantomData)
+        Self::from_raw(bits as i64)
     }
 
-    /// Extracts the raw bit representation, masked to `I + F` bits.
+    /// Extracts the raw bit pattern, masked to the low `I + F` bits.
+    ///
+    /// Returns the unsigned two's-complement pattern (a negative value reads
+    /// back as a large positive), matching [`f64::to_bits`]. For the signed
+    /// numeric value, use [`to_count`](Self::to_count).
     ///
     /// # Returns
     ///
-    /// The raw fixed-point value as a non-sign-extended `i64`.
-    /// Only the low `I + F` bits are meaningful.
+    /// The raw fixed-point bits as a `u64`; only the low `I + F` bits are
+    /// meaningful.
     #[inline]
-    pub const fn to_bits(self) -> i64 {
-        if Self::TOTAL_BITS >= 64 {
-            self.0
-        } else {
-            ((self.0 as u64) & Self::MASK) as i64
-        }
+    pub const fn to_bits(self) -> u64 {
+        (self.0 as u64) & Self::MASK
     }
 
     /// Returns the internally stored sign-extended value.
@@ -199,34 +195,48 @@ impl<I: Unsigned, F: Unsigned> Q<I, F> {
         }
     }
 
-    /// Constructs from an integer value by shifting left by `F`.
+    /// Constructs from a signed count of fractional LSB units.
+    ///
+    /// One count is `2^-F` (one LSB), so the resulting value is
+    /// `count * 2^-F` and `count` is exactly the signed two's-complement
+    /// register word. Lossless; the exact inverse of
+    /// [`to_count`](Self::to_count). To build a whole number use the
+    /// [`From`] conversions (e.g. `Q::from(3i32)`).
     ///
     /// # Arguments
     ///
-    /// * `val` - The integer to convert.
+    /// * `count` - The number of `2^-F` units.
     ///
     /// # Returns
     ///
-    /// A new `Q<I, F>` representing `val` as a fixed-point value.
+    /// A new `Q<I, F>` representing `count * 2^-F`.
     ///
     /// # Panics
     ///
-    /// In debug mode, panics if `val` does not fit in `I` integer bits.
+    /// In debug mode, panics if `count` is outside `[MIN, MAX]` for this type.
     #[inline]
-    pub const fn from_int(val: i64) -> Self {
+    pub const fn from_count(count: i64) -> Self {
         Self::check();
-        let shifted = val << Self::FRACTIONAL_BITS;
-        Self::from_bits(shifted)
+        debug_assert!(
+            count >= Self::MIN.0 && count <= Self::MAX.0,
+            "from_count: value out of range for this Q type"
+        );
+        Self::from_raw(count)
     }
 
-    /// Extracts the integer part, truncating toward zero.
+    /// Returns the value as a signed count of fractional LSB units.
+    ///
+    /// One count is `2^-F` (one LSB), so this returns `value * 2^F` — the raw
+    /// two's-complement register word as a signed integer. Lossless; the exact
+    /// inverse of [`from_count`](Self::from_count). For the unsigned bit
+    /// pattern, use [`to_bits`](Self::to_bits).
     ///
     /// # Returns
     ///
-    /// The integer portion of the fixed-point value.
+    /// The signed count of `2^-F` units.
     #[inline]
-    pub const fn to_int(self) -> i64 {
-        self.0 >> Self::FRACTIONAL_BITS
+    pub const fn to_count(self) -> i64 {
+        self.0
     }
 
     /// Constructs from `f64` by quantizing to the nearest representable
@@ -591,10 +601,10 @@ impl<I: Unsigned, F: Unsigned> Q<I, F> {
     /// ```
     /// # use qfixed::Q;
     /// # use qfixed::typenum::{U12, U4, U24, U8};
-    /// let a = Q::<U12, U4>::from_int(3);
-    /// let b = Q::<U12, U4>::from_int(4);
+    /// let a = Q::<U12, U4>::from(3i32);
+    /// let b = Q::<U12, U4>::from(4i32);
     /// let c: Q<U24, U8> = a.widening_mul(b);
-    /// assert_eq!(c.to_int(), 12);
+    /// assert_eq!(c.to_f64(), 12.0);
     /// ```
     #[inline]
     pub fn widening_mul<I2: Unsigned, F2: Unsigned, IO: Unsigned, FO: Unsigned>(
