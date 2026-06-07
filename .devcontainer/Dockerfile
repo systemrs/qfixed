@@ -49,7 +49,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     | sh -s -- -y --profile minimal --default-toolchain none
 COPY rust-toolchain.toml /tmp/rust-toolchain.toml
 RUN TOOLCHAIN="$(sed -n 's/^channel = "\(.*\)"/\1/p' /tmp/rust-toolchain.toml)" \
-    && rustup toolchain install "${TOOLCHAIN}" --profile minimal --component rustfmt clippy \
+    && rustup toolchain install "${TOOLCHAIN}" --profile minimal --component rustfmt --component clippy \
     && rustup default "${TOOLCHAIN}" \
     && rm /tmp/rust-toolchain.toml \
     && rustc --version && cargo clippy --version && cargo fmt --version
