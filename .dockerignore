@@ -1,0 +1,6 @@
+# The devcontainer/CI image installs only the toolchain (it COPYs no source —
+# the repo is bind-mounted at run time), so nothing here needs to enter the
+# build context. Excluding these keeps `docker build` context transfer fast.
+target/
+.git/
+**/*:Zone.Identifier

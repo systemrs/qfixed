@@ -1,0 +1,8 @@
+.claude/*
+*:Zone.Identifier
+/external
+/target
+
+!.claude/agents
+!.claude/settings.json
+!.claude/skills

@@ -1,0 +1,37 @@
+# cargo-deny configuration — see https://embarkstudios.github.io/cargo-deny/
+#
+# Run with `cargo deny check` (part of scripts/ci.sh). It vets the dependency
+# graph for security advisories, license policy, duplicate versions, and crate
+# sources.
+
+[graph]
+# Vet the same feature set we build and test with, so optional dependencies
+# (e.g. serde) are included in the license/advisory analysis.
+all-features = true
+
+[advisories]
+version = 2
+# RustSec advisory IDs to ignore, with a justification, e.g. "RUSTSEC-2024-XXXX".
+ignore = []
+
+[licenses]
+version = 2
+# Allow-list for the dependency graph. qfixed and its active dependencies
+# (typenum, serde, serde_core) are all MIT OR Apache-2.0. cargo-deny names any
+# new license it encounters, so adding a dependency that introduces one becomes
+# a deliberate review step here.
+allow = [
+    "MIT",
+    "Apache-2.0",
+]
+confidence-threshold = 0.8
+
+[bans]
+# Duplicate versions of the same crate are a warning, not a hard failure.
+multiple-versions = "warn"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

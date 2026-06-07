@@ -1,0 +1,11 @@
+# The single source of truth for the toolchain version. Local development, the
+# devcontainer, and CI all honor this file, so all three compile, lint, and
+# format with the exact same compiler — no "works on my machine" drift.
+#
+# The devcontainer/CI image (.devcontainer/Dockerfile) reads the channel from
+# here at build time, so bumping the version below updates everywhere and
+# invalidates the cached toolchain layer.
+[toolchain]
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

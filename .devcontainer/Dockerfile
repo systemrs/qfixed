@@ -1,0 +1,109 @@
+# QFixed Development Container
+#
+# QFixed is a pure-Rust library of bit-accurate fixed-point types using
+# Texas Instruments style Q notation, intended for RTL digital-twin modeling.
+# As a host-only, dependency-light Rust crate it needs only:
+#   - a Rust toolchain (current stable) with rustfmt/clippy;
+#   - the cargo quality tools the build-verification checks rely on
+#     (deny, audit — see the claude-skill-rust skill);
+#   - the Claude Code CLI (native installer).
+#
+# It deliberately carries no C/C++/CMake toolchain, FPGA/USB programming tools,
+# or cross-compilation targets — none of which a pure-Rust numeric library needs.
+FROM ubuntu:24.04
+
+# Avoid prompts during package installation.
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Base packages.
+#   build-essential supplies the `cc` linker that rustc needs to link test and
+#   release binaries (and bundles make). openssh-client is a *Recommends* of
+#   git, so --no-install-recommends drops it; we add it explicitly so `git push`
+#   over an SSH remote can use VS Code's forwarded ssh-agent (SSH_AUTH_SOCK).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    openssh-client \
+    curl \
+    ca-certificates \
+    sudo \
+    locales \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up locale.
+RUN locale-gen en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US:en
+ENV LC_ALL=en_US.UTF-8
+
+# Install Rust via rustup into a shared location that is on PATH for every user.
+# The EXACT toolchain version comes from the repo's rust-toolchain.toml (copied
+# in below), so the image, the devcontainer, and CI all build with the same
+# pinned compiler — and a version bump in that file invalidates this layer so
+# the toolchain is never silently stale. rustfmt + clippy are installed because
+# the verification suite (scripts/ci.sh) runs `cargo fmt` and `cargo clippy`.
+ENV RUSTUP_HOME=/opt/rustup
+ENV CARGO_HOME=/opt/cargo
+ENV PATH="${CARGO_HOME}/bin:${PATH}"
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --profile minimal --default-toolchain none
+COPY rust-toolchain.toml /tmp/rust-toolchain.toml
+RUN TOOLCHAIN="$(sed -n 's/^channel = "\(.*\)"/\1/p' /tmp/rust-toolchain.toml)" \
+    && rustup toolchain install "${TOOLCHAIN}" --profile minimal --component rustfmt --component clippy \
+    && rustup default "${TOOLCHAIN}" \
+    && rm /tmp/rust-toolchain.toml \
+    && rustc --version && cargo clippy --version && cargo fmt --version
+
+# Cargo quality tools used by the verification suite (scripts/ci.sh):
+#   cargo-deny  — license + advisory + duplicate-version gate (deny.toml)
+#   cargo-audit — RustSec vulnerability scanner
+RUN cargo install --locked cargo-deny cargo-audit
+
+# Create non-root user for development (handle existing UID/GID 1000).
+ARG USERNAME=vscode
+ARG USER_UID=1000
+ARG USER_GID=${USER_UID}
+
+RUN if getent group ${USER_GID} > /dev/null 2>&1; then \
+    existing_group=$(getent group ${USER_GID} | cut -d: -f1); \
+    groupmod -n ${USERNAME} ${existing_group}; \
+    else \
+    groupadd --gid ${USER_GID} ${USERNAME}; \
+    fi \
+    && if getent passwd ${USER_UID} > /dev/null 2>&1; then \
+    existing_user=$(getent passwd ${USER_UID} | cut -d: -f1); \
+    usermod -l ${USERNAME} -d /home/${USERNAME} -m ${existing_user}; \
+    else \
+    useradd --uid ${USER_UID} --gid ${USER_GID} -m ${USERNAME}; \
+    fi \
+    && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} \
+    && chmod 0440 /etc/sudoers.d/${USERNAME}
+
+# Hand the Rust install to the dev user so it can add components and download
+# crates without sudo. The registry/git caches live here and are backed by named
+# volumes (see devcontainer.json) so downloads survive container rebuilds.
+RUN mkdir -p /opt/cargo/registry /opt/cargo/git \
+    && chown -R ${USERNAME}:${USERNAME} /opt/cargo /opt/rustup
+
+# Store Claude Code config in the workspace so plans and memory persist across
+# devcontainer rebuilds.
+ENV CLAUDE_CONFIG_DIR=/workspaces/qfixed/.claude
+
+# Final user switch + workdir (matches workspaceFolder in devcontainer.json).
+USER ${USERNAME}
+WORKDIR /workspaces/qfixed
+
+# Install Claude Code via the official native installer. It bundles its own
+# runtime (no Node.js required) and installs into the dev user's ~/.local/bin,
+# which the user owns and can auto-update in place.
+#
+# CI reuses this very Dockerfile but does not need the editor agent, so it
+# builds with `--build-arg INSTALL_CLAUDE_CODE=false` to skip the download and
+# keep the image lean. The default (true) preserves the local dev experience.
+ARG INSTALL_CLAUDE_CODE=true
+ENV PATH="/home/${USERNAME}/.local/bin:${PATH}"
+RUN if [ "${INSTALL_CLAUDE_CODE}" = "true" ]; then \
+    curl -fsSL https://claude.ai/install.sh | bash && claude --version; \
+    else \
+    echo "Skipping Claude Code install (INSTALL_CLAUDE_CODE=${INSTALL_CLAUDE_CODE})"; \
+    fi
