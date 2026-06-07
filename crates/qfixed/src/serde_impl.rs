@@ -3,11 +3,12 @@
 //! Serializes as raw bits (`i64` for `Q`, `u64` for `UQ`).
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use typenum::Unsigned;
 
 use crate::q::Q;
 use crate::uq::UQ;
 
-impl<const I: u32, const F: u32> Serialize for Q<I, F> {
+impl<I: Unsigned, F: Unsigned> Serialize for Q<I, F> {
     /// Serializes the raw bit representation as `i64`.
     ///
     /// # Arguments
@@ -22,7 +23,7 @@ impl<const I: u32, const F: u32> Serialize for Q<I, F> {
     }
 }
 
-impl<'de, const I: u32, const F: u32> Deserialize<'de> for Q<I, F> {
+impl<'de, I: Unsigned, F: Unsigned> Deserialize<'de> for Q<I, F> {
     /// Deserializes from `i64` raw bits.
     ///
     /// # Arguments
@@ -38,7 +39,7 @@ impl<'de, const I: u32, const F: u32> Deserialize<'de> for Q<I, F> {
     }
 }
 
-impl<const I: u32, const F: u32> Serialize for UQ<I, F> {
+impl<I: Unsigned, F: Unsigned> Serialize for UQ<I, F> {
     /// Serializes the raw bit representation as `u64`.
     ///
     /// # Arguments
@@ -53,7 +54,7 @@ impl<const I: u32, const F: u32> Serialize for UQ<I, F> {
     }
 }
 
-impl<'de, const I: u32, const F: u32> Deserialize<'de> for UQ<I, F> {
+impl<'de, I: Unsigned, F: Unsigned> Deserialize<'de> for UQ<I, F> {
     /// Deserializes from `u64` raw bits.
     ///
     /// # Arguments

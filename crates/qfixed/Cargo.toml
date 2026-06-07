@@ -11,4 +11,5 @@ default = []
 serde = ["dep:serde"]
 
 [dependencies]
+typenum = { version = "1", default-features = false }
 serde = { version = "1", default-features = false, optional = true }

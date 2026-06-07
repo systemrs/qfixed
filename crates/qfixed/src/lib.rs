@@ -2,25 +2,36 @@
 //!
 //! Provides `Q<I, F>` (signed) and `UQ<I, F>` (unsigned) fixed-point types
 //! where `I` is the number of integer bits (including sign for `Q`) and `F`
-//! is the number of fractional bits.
+//! is the number of fractional bits. `I` and `F` are [`typenum`] type-level
+//! unsigned integers (`U0`, `U1`, `U8`, …), e.g. `Q<U12, U4>`.
 //! Total bit width is `I + F`, backed by `i64`/`u64` internally.
 //!
-//! Arithmetic operators produce widened outputs that cannot overflow:
-//! - `Q<I,F> + Q<I,F>` → `Q<{I+1}, F>`
-//! - `Q<I,F> - Q<I,F>` → `Q<{I+1}, F>`
-//! - `Q<I,F> * Q<I,F>` → `Q<{I+I}, {F+F}>`
-//! - `-Q<I,F>` → `Q<{I+1}, F>`
-//! - `UQ<I,F> - UQ<I,F>` → `Q<{I+1}, F>` (signed, since result can be negative)
+//! Arithmetic operators produce widened outputs that cannot overflow. The
+//! output widths are computed at the type level with `typenum` (`Sum<I, U1>` is
+//! `I + 1`, `Sum<I, I>` is `2 * I`), so this works on stable Rust:
+//! - `Q<I,F> + Q<I,F>` → `Q<Sum<I, U1>, F>`
+//! - `Q<I,F> - Q<I,F>` → `Q<Sum<I, U1>, F>`
+//! - `Q<I,F> * Q<I,F>` → `Q<Sum<I, I>, Sum<F, F>>`
+//! - `-Q<I,F>` → `Q<Sum<I, U1>, F>`
+//! - `UQ<I,F> - UQ<I,F>` → `Q<Sum<I, U1>, F>` (signed, since result can be negative)
 //!
 //! Use `.truncate()` or `.saturate()` to narrow results back down.
 //! Use `wrapping_add`/`wrapping_sub`/`wrapping_mul` for same-type RTL
 //! truncation semantics.
 //! Use `saturating_add`/`saturating_sub`/`saturating_mul` to clamp.
+//!
+//! ```
+//! use qfixed::Q;
+//! use qfixed::typenum::{U4, U12};
+//!
+//! let a = Q::<U12, U4>::from_int(3);
+//! let b = Q::<U12, U4>::from_int(4);
+//! let sum = a + b; // Q<U13, U4> — one extra integer bit, cannot overflow
+//! assert_eq!(sum.to_int(), 7);
+//! ```
 
 #![no_std]
 #![deny(unsafe_code)]
-#![allow(incomplete_features)]
-#![feature(generic_const_exprs)]
 #![cfg_attr(all(not(debug_assertions), not(test)), deny(clippy::all))]
 #![cfg_attr(all(not(debug_assertions), not(test)), deny(clippy::pedantic))]
 #![cfg_attr(all(not(debug_assertions), not(test)), deny(missing_docs))]
@@ -28,6 +39,19 @@
 #![allow(clippy::must_use_candidate)]
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]
+// Bit-accurate fixed-point arithmetic is built on deliberate narrowing,
+// wrapping, and sign-changing casts that model RTL register semantics, so these
+// pedantic cast lints would fire on essentially every operation.
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)]
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_lossless)]
+// These are value types; constructors and operators return new values by
+// design. Tagging every one `#[must_use]` is noise (cf. `must_use_candidate`).
+#![allow(clippy::return_self_not_must_use)]
+// `#[inline(always)]` on the trivial compile-time parameter checks is intended.
+#![allow(clippy::inline_always)]
 // Until 1.0.0, allow dead code and unused dependency warnings.
 #![allow(dead_code)]
 #![allow(unused_crate_dependencies)]
@@ -42,3 +66,10 @@ mod uq;
 
 pub use q::Q;
 pub use uq::UQ;
+
+/// Re-export of [`typenum`], whose type-level unsigned integers (`U0`, `U1`,
+/// `U8`, …) supply the `I` and `F` parameters, e.g. `Q<U12, U4>`.
+///
+/// The widening operators derive their output widths from these at the type
+/// level on stable Rust — `Q<I,F> + Q<I,F>` yields `Q<Sum<I, U1>, F>`.
+pub use typenum;

@@ -1,31 +1,44 @@
 //! Unsigned fixed-point type `UQ<I, F>`.
 
+use core::marker::PhantomData;
+
+use typenum::Unsigned;
+
 /// Unsigned fixed-point number with `I` integer bits and `F` fractional bits.
+///
+/// `I` and `F` are [`typenum`](crate::typenum) unsigned integers, e.g.
+/// `UQ<U4, U14>`.
 ///
 /// Total bit width = `I + F`, must satisfy `1 <= I + F <= 64`.
 /// Internally backed by `u64`, masked to `I + F` bits.
 ///
 /// # Notation
 ///
-/// Follows TI-style UQ notation: `UQ<1, 7>` is an 8-bit unsigned value with
+/// Follows TI-style UQ notation: `UQ<U1, U7>` is an 8-bit unsigned value with
 /// 1 integer bit and 7 fractional bits, representing values in increments of
 /// 1/128.
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct UQ<const I: u32, const F: u32>(pub(crate) u64);
+pub struct UQ<I, F>(pub(crate) u64, PhantomData<(I, F)>);
 
-impl<const I: u32, const F: u32> UQ<I, F> {
+impl<I: Unsigned, F: Unsigned> UQ<I, F> {
+    /// Total number of integer bits in this fixed-point type.
+    pub const INTEGER_BITS: u32 = I::U32;
+
+    /// Total number of fractional bits in this fixed-point type.
+    pub const FRACTIONAL_BITS: u32 = F::U32;
+
     /// Total number of bits in this fixed-point type.
-    pub const TOTAL_BITS: u32 = I + F;
+    pub const TOTAL_BITS: u32 = Self::INTEGER_BITS + Self::FRACTIONAL_BITS;
 
     /// Bitmask covering the valid bits.
-    const MASK: u64 = if I + F >= 64 {
+    const MASK: u64 = if Self::TOTAL_BITS >= 64 {
         u64::MAX
     } else {
-        (1u64 << (I + F)) - 1
+        (1u64 << Self::TOTAL_BITS) - 1
     };
 
     /// The value zero (0.0).
-    pub const ZERO: Self = Self(0);
+    pub const ZERO: Self = Self(0, PhantomData);
 
     /// The value one (1.0).
     ///
@@ -35,23 +48,26 @@ impl<const I: u32, const F: u32> UQ<I, F> {
     ///
     /// Panics at compile time if `I == 0`.
     pub const ONE: Self = {
-        assert!(I + F > 0, "UQ type must have at least 1 bit");
-        assert!(I + F <= 64, "UQ type cannot exceed 64 bits");
-        assert!(I >= 1, "UQ<I,F> with I==0 cannot represent 1.0");
-        Self(1u64 << F)
+        assert!(Self::TOTAL_BITS > 0, "UQ type must have at least 1 bit");
+        assert!(Self::TOTAL_BITS <= 64, "UQ type cannot exceed 64 bits");
+        assert!(
+            Self::INTEGER_BITS >= 1,
+            "UQ<I,F> with I==0 cannot represent 1.0"
+        );
+        Self(1u64 << Self::FRACTIONAL_BITS, PhantomData)
     };
 
     /// Maximum representable value.
     ///
     /// For `UQ<I, F>`, this is `2^I - 2^(-F)`.
     pub const MAX: Self = {
-        assert!(I + F > 0, "UQ type must have at least 1 bit");
-        assert!(I + F <= 64, "UQ type cannot exceed 64 bits");
-        Self(Self::MASK)
+        assert!(Self::TOTAL_BITS > 0, "UQ type must have at least 1 bit");
+        assert!(Self::TOTAL_BITS <= 64, "UQ type cannot exceed 64 bits");
+        Self(Self::MASK, PhantomData)
     };
 
     /// Minimum representable value (always zero for unsigned).
-    pub const MIN: Self = Self(0);
+    pub const MIN: Self = Self(0, PhantomData);
 
     /// Forces compile-time validation of the type parameters.
     ///
@@ -60,8 +76,8 @@ impl<const I: u32, const F: u32> UQ<I, F> {
     /// Panics at compile time if `I + F` is 0 or exceeds 64.
     #[inline(always)]
     pub(crate) const fn check() {
-        assert!(I + F > 0, "UQ type must have at least 1 bit");
-        assert!(I + F <= 64, "UQ type cannot exceed 64 bits");
+        assert!(Self::TOTAL_BITS > 0, "UQ type must have at least 1 bit");
+        assert!(Self::TOTAL_BITS <= 64, "UQ type cannot exceed 64 bits");
     }
 
     /// Constructs from a raw bit representation.
@@ -88,7 +104,7 @@ impl<const I: u32, const F: u32> UQ<I, F> {
             raw == masked,
             "from_bits: value out of range for this UQ type"
         );
-        Self(masked)
+        Self(masked, PhantomData)
     }
 
     /// Extracts the raw bit representation.
@@ -124,7 +140,7 @@ impl<const I: u32, const F: u32> UQ<I, F> {
     #[inline]
     pub(crate) const fn from_raw(raw: u64) -> Self {
         Self::check();
-        Self(raw & Self::MASK)
+        Self(raw & Self::MASK, PhantomData)
     }
 
     /// Constructs from an integer value by shifting left by `F`.
@@ -143,7 +159,7 @@ impl<const I: u32, const F: u32> UQ<I, F> {
     #[inline]
     pub const fn from_int(val: u64) -> Self {
         Self::check();
-        let shifted = val << F;
+        let shifted = val << Self::FRACTIONAL_BITS;
         Self::from_bits(shifted)
     }
 
@@ -154,7 +170,7 @@ impl<const I: u32, const F: u32> UQ<I, F> {
     /// The integer portion of the fixed-point value.
     #[inline]
     pub const fn to_int(self) -> u64 {
-        self.0 >> F
+        self.0 >> Self::FRACTIONAL_BITS
     }
 
     /// Constructs from `f64` by quantizing to the nearest representable
@@ -170,7 +186,7 @@ impl<const I: u32, const F: u32> UQ<I, F> {
     #[inline]
     pub fn from_f64(val: f64) -> Self {
         Self::check();
-        let scale = (1u64 << F) as f64;
+        let scale = (1u64 << Self::FRACTIONAL_BITS) as f64;
         let raw = (val * scale) as u64;
         Self::from_raw(raw)
     }
@@ -182,7 +198,7 @@ impl<const I: u32, const F: u32> UQ<I, F> {
     /// The fixed-point value as a floating-point approximation.
     #[inline]
     pub fn to_f64(self) -> f64 {
-        let scale = (1u64 << F) as f64;
+        let scale = (1u64 << Self::FRACTIONAL_BITS) as f64;
         self.0 as f64 / scale
     }
 
@@ -197,11 +213,7 @@ impl<const I: u32, const F: u32> UQ<I, F> {
     /// The smaller of the two values.
     #[inline]
     pub const fn min(self, other: Self) -> Self {
-        if self.0 < other.0 {
-            self
-        } else {
-            other
-        }
+        if self.0 < other.0 { self } else { other }
     }
 
     /// Returns the maximum of `self` and `other`.
@@ -215,11 +227,7 @@ impl<const I: u32, const F: u32> UQ<I, F> {
     /// The larger of the two values.
     #[inline]
     pub const fn max(self, other: Self) -> Self {
-        if self.0 > other.0 {
-            self
-        } else {
-            other
-        }
+        if self.0 > other.0 { self } else { other }
     }
 
     /// Clamps `self` to the range `[lo, hi]`.
@@ -280,7 +288,7 @@ impl<const I: u32, const F: u32> UQ<I, F> {
     #[inline]
     pub const fn wrapping_mul(self, rhs: Self) -> Self {
         let product = self.0 as u128 * rhs.0 as u128;
-        let shifted = (product >> F) as u64;
+        let shifted = (product >> Self::FRACTIONAL_BITS) as u64;
         Self::from_raw(shifted)
     }
 
@@ -298,7 +306,7 @@ impl<const I: u32, const F: u32> UQ<I, F> {
     /// The truncated quotient in the same `UQ<I, F>` format.
     #[inline]
     pub const fn wrapping_div(self, rhs: Self) -> Self {
-        let numer = (self.0 as u128) << F;
+        let numer = (self.0 as u128) << Self::FRACTIONAL_BITS;
         let result = (numer / rhs.0 as u128) as u64;
         Self::from_raw(result)
     }
@@ -314,8 +322,8 @@ impl<const I: u32, const F: u32> UQ<I, F> {
     /// The sum, clamped to the representable range.
     #[inline]
     pub const fn saturating_add(self, rhs: Self) -> Self {
-        if I + F >= 64 {
-            Self(self.0.saturating_add(rhs.0))
+        if Self::TOTAL_BITS >= 64 {
+            Self(self.0.saturating_add(rhs.0), PhantomData)
         } else {
             let sum = self.0 as u128 + rhs.0 as u128;
             if sum > Self::MASK as u128 {
@@ -361,7 +369,7 @@ impl<const I: u32, const F: u32> UQ<I, F> {
     #[inline]
     pub const fn saturating_mul(self, rhs: Self) -> Self {
         let product = self.0 as u128 * rhs.0 as u128;
-        let shifted = product >> F;
+        let shifted = product >> Self::FRACTIONAL_BITS;
         if shifted > Self::MASK as u128 {
             Self::MAX
         } else {
@@ -386,15 +394,21 @@ impl<const I: u32, const F: u32> UQ<I, F> {
     ///
     /// In debug mode, panics if `IO + FO < I + F + 1`.
     #[inline]
-    pub fn widening_add<const IO: u32, const FO: u32>(self, rhs: Self) -> UQ<IO, FO> {
+    pub fn widening_add<IO: Unsigned, FO: Unsigned>(self, rhs: Self) -> UQ<IO, FO> {
         UQ::<IO, FO>::check();
         debug_assert!(
-            IO + FO > I + F,
+            UQ::<IO, FO>::TOTAL_BITS > Self::TOTAL_BITS,
             "widening_add: output UQ<{}, {}> ({} bits) too narrow for UQ<{}, {}> + UQ<{}, {}> ({} bits needed)",
-            IO, FO, IO + FO,
-            I, F, I, F, I + F + 1
+            IO::U32,
+            FO::U32,
+            UQ::<IO, FO>::TOTAL_BITS,
+            I::U32,
+            F::U32,
+            I::U32,
+            F::U32,
+            Self::TOTAL_BITS + 1
         );
-        let shift = FO as i32 - F as i32;
+        let shift = FO::U32 as i32 - F::U32 as i32;
         let a = if shift >= 0 {
             (self.0 as u128) << shift
         } else {
@@ -425,15 +439,21 @@ impl<const I: u32, const F: u32> UQ<I, F> {
     ///
     /// In debug mode, panics if `IO + FO < I + F + 1`.
     #[inline]
-    pub fn widening_sub<const IO: u32, const FO: u32>(self, rhs: Self) -> crate::q::Q<IO, FO> {
+    pub fn widening_sub<IO: Unsigned, FO: Unsigned>(self, rhs: Self) -> crate::q::Q<IO, FO> {
         crate::q::Q::<IO, FO>::check();
         debug_assert!(
-            IO + FO > I + F,
+            crate::q::Q::<IO, FO>::TOTAL_BITS > Self::TOTAL_BITS,
             "widening_sub: output Q<{}, {}> ({} bits) too narrow for UQ<{}, {}> - UQ<{}, {}> ({} bits needed)",
-            IO, FO, IO + FO,
-            I, F, I, F, I + F + 1
+            IO::U32,
+            FO::U32,
+            crate::q::Q::<IO, FO>::TOTAL_BITS,
+            I::U32,
+            F::U32,
+            I::U32,
+            F::U32,
+            Self::TOTAL_BITS + 1
         );
-        let shift = FO as i32 - F as i32;
+        let shift = FO::U32 as i32 - F::U32 as i32;
         let a = if shift >= 0 {
             (self.0 as i128) << shift
         } else {
@@ -465,21 +485,27 @@ impl<const I: u32, const F: u32> UQ<I, F> {
     ///
     /// In debug mode, panics if `IO + FO < I + F + I2 + F2`.
     #[inline]
-    pub fn widening_mul<const I2: u32, const F2: u32, const IO: u32, const FO: u32>(
+    pub fn widening_mul<I2: Unsigned, F2: Unsigned, IO: Unsigned, FO: Unsigned>(
         self,
         rhs: UQ<I2, F2>,
     ) -> UQ<IO, FO> {
         UQ::<I2, F2>::check();
         UQ::<IO, FO>::check();
         debug_assert!(
-            IO + FO >= I + F + I2 + F2,
+            UQ::<IO, FO>::TOTAL_BITS >= Self::TOTAL_BITS + UQ::<I2, F2>::TOTAL_BITS,
             "widening_mul: output UQ<{}, {}> ({} bits) too narrow for UQ<{}, {}> * UQ<{}, {}> ({} bits needed)",
-            IO, FO, IO + FO,
-            I, F, I2, F2, I + F + I2 + F2
+            IO::U32,
+            FO::U32,
+            UQ::<IO, FO>::TOTAL_BITS,
+            I::U32,
+            F::U32,
+            I2::U32,
+            F2::U32,
+            Self::TOTAL_BITS + UQ::<I2, F2>::TOTAL_BITS
         );
         let product = self.0 as u128 * rhs.0 as u128;
-        let frac_in = F + F2;
-        let shift = frac_in as i32 - FO as i32;
+        let frac_in = F::U32 + F2::U32;
+        let shift = frac_in as i32 - FO::U32 as i32;
         let result = if shift > 0 {
             product >> shift
         } else {

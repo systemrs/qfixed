@@ -1,23 +1,27 @@
-//! `std::ops` trait implementations for `Q` and `UQ`.
+//! `core::ops` trait implementations for `Q` and `UQ`.
 //!
 //! Implements `Add`, `Sub`, `Neg` (Q only), `Mul`, `Shl`, `Shr`, `BitAnd`,
 //! `BitOr`.
 //!
-//! Arithmetic operators produce widened outputs that cannot overflow:
-//! - `Q<I,F> + Q<I,F>` → `Q<{I+1}, F>` (one extra integer bit)
-//! - `Q<I,F> - Q<I,F>` → `Q<{I+1}, F>` (one extra integer bit)
-//! - `Q<I,F> * Q<I,F>` → `Q<{I+I}, {F+F}>` (full-width product)
-//! - `-Q<I,F>` → `Q<{I+1}, F>` (handles MIN)
+//! Arithmetic operators produce widened outputs that cannot overflow. The
+//! output widths are derived at the type level with [`typenum`](crate::typenum)
+//! (`Sum<I, U1>` = `I + 1`, `Sum<I, I>` = `2 * I`):
+//! - `Q<I,F> + Q<I,F>` → `Q<Sum<I, U1>, F>` (one extra integer bit)
+//! - `Q<I,F> - Q<I,F>` → `Q<Sum<I, U1>, F>` (one extra integer bit)
+//! - `Q<I,F> * Q<I,F>` → `Q<Sum<I, I>, Sum<F, F>>` (full-width product)
+//! - `-Q<I,F>` → `Q<Sum<I, U1>, F>` (handles MIN)
 //!
 //! Use `.truncate()` or `.saturate()` to narrow the result back down.
 //! Use `wrapping_add`/`wrapping_sub`/`wrapping_mul` for same-type RTL
 //! truncation semantics.
 
-// Widening operators use arithmetic in const generic params (e.g., `Q<{I+1}, F>`
-// inside an Add impl), which clippy misinterprets as wrong-operation bugs.
+// Widening operators return a wider type than `Self`, which clippy
+// misinterprets as wrong-operation bugs.
 #![allow(clippy::suspicious_arithmetic_impl)]
 
 use core::ops;
+
+use typenum::{Sum, U1, Unsigned};
 
 use crate::q::Q;
 use crate::uq::UQ;
@@ -30,13 +34,15 @@ use crate::uq::UQ;
 // Q<I, F>: Add
 // ---------------------------------------------------------------------------
 
-impl<const I: u32, const F: u32> ops::Add for Q<I, F>
+impl<I, F> ops::Add for Q<I, F>
 where
-    [(); (I + 1 + F) as usize]:,
+    I: Unsigned + ops::Add<U1>,
+    F: Unsigned,
+    Sum<I, U1>: Unsigned,
 {
-    type Output = Q<{ I + 1 }, F>;
+    type Output = Q<Sum<I, U1>, F>;
 
-    /// Adds two `Q<I, F>` values, producing `Q<{I+1}, F>`.
+    /// Adds two `Q<I, F>` values, producing `Q<Sum<I, U1>, F>`.
     ///
     /// The extra integer bit guarantees no overflow.
     ///
@@ -46,10 +52,10 @@ where
     ///
     /// # Returns
     ///
-    /// The exact sum as `Q<{I+1}, F>`.
+    /// The exact sum as `Q<Sum<I, U1>, F>`.
     #[inline]
     fn add(self, rhs: Self) -> Self::Output {
-        Q::<{ I + 1 }, F>::from_raw(self.raw() + rhs.raw())
+        Q::<Sum<I, U1>, F>::from_raw(self.raw() + rhs.raw())
     }
 }
 
@@ -57,13 +63,15 @@ where
 // Q<I, F>: Sub
 // ---------------------------------------------------------------------------
 
-impl<const I: u32, const F: u32> ops::Sub for Q<I, F>
+impl<I, F> ops::Sub for Q<I, F>
 where
-    [(); (I + 1 + F) as usize]:,
+    I: Unsigned + ops::Add<U1>,
+    F: Unsigned,
+    Sum<I, U1>: Unsigned,
 {
-    type Output = Q<{ I + 1 }, F>;
+    type Output = Q<Sum<I, U1>, F>;
 
-    /// Subtracts two `Q<I, F>` values, producing `Q<{I+1}, F>`.
+    /// Subtracts two `Q<I, F>` values, producing `Q<Sum<I, U1>, F>`.
     ///
     /// The extra integer bit guarantees no overflow.
     ///
@@ -73,10 +81,10 @@ where
     ///
     /// # Returns
     ///
-    /// The exact difference as `Q<{I+1}, F>`.
+    /// The exact difference as `Q<Sum<I, U1>, F>`.
     #[inline]
     fn sub(self, rhs: Self) -> Self::Output {
-        Q::<{ I + 1 }, F>::from_raw(self.raw() - rhs.raw())
+        Q::<Sum<I, U1>, F>::from_raw(self.raw() - rhs.raw())
     }
 }
 
@@ -84,22 +92,24 @@ where
 // Q<I, F>: Neg
 // ---------------------------------------------------------------------------
 
-impl<const I: u32, const F: u32> ops::Neg for Q<I, F>
+impl<I, F> ops::Neg for Q<I, F>
 where
-    [(); (I + 1 + F) as usize]:,
+    I: Unsigned + ops::Add<U1>,
+    F: Unsigned,
+    Sum<I, U1>: Unsigned,
 {
-    type Output = Q<{ I + 1 }, F>;
+    type Output = Q<Sum<I, U1>, F>;
 
-    /// Negates a `Q<I, F>` value, producing `Q<{I+1}, F>`.
+    /// Negates a `Q<I, F>` value, producing `Q<Sum<I, U1>, F>`.
     ///
     /// The extra integer bit handles the MIN case without wrapping.
     ///
     /// # Returns
     ///
-    /// The exact negation as `Q<{I+1}, F>`.
+    /// The exact negation as `Q<Sum<I, U1>, F>`.
     #[inline]
     fn neg(self) -> Self::Output {
-        Q::<{ I + 1 }, F>::from_raw(-self.raw())
+        Q::<Sum<I, U1>, F>::from_raw(-self.raw())
     }
 }
 
@@ -107,14 +117,16 @@ where
 // Q<I, F>: Mul
 // ---------------------------------------------------------------------------
 
-impl<const I: u32, const F: u32> ops::Mul for Q<I, F>
+impl<I, F> ops::Mul for Q<I, F>
 where
-    [(); (I + I + F + F) as usize]:,
-    [(); { F + F } as usize]:,
+    I: Unsigned + ops::Add<I>,
+    F: Unsigned + ops::Add<F>,
+    Sum<I, I>: Unsigned,
+    Sum<F, F>: Unsigned,
 {
-    type Output = Q<{ I + I }, { F + F }>;
+    type Output = Q<Sum<I, I>, Sum<F, F>>;
 
-    /// Multiplies two `Q<I, F>` values, producing `Q<{I+I}, {F+F}>`.
+    /// Multiplies two `Q<I, F>` values, producing `Q<Sum<I, I>, Sum<F, F>>`.
     ///
     /// The full-width product cannot overflow.
     /// Use `.truncate()` or `.saturate()` to narrow the result.
@@ -125,11 +137,11 @@ where
     ///
     /// # Returns
     ///
-    /// The exact product as `Q<{I+I}, {F+F}>`.
+    /// The exact product as `Q<Sum<I, I>, Sum<F, F>>`.
     #[inline]
     fn mul(self, rhs: Self) -> Self::Output {
         let product = self.raw() as i128 * rhs.raw() as i128;
-        Q::<{ I + I }, { F + F }>::from_raw(product as i64)
+        Q::<Sum<I, I>, Sum<F, F>>::from_raw(product as i64)
     }
 }
 
@@ -137,7 +149,7 @@ where
 // Q<I, F>: Shl, Shr
 // ---------------------------------------------------------------------------
 
-impl<const I: u32, const F: u32> ops::Shl<u32> for Q<I, F> {
+impl<I: Unsigned, F: Unsigned> ops::Shl<u32> for Q<I, F> {
     type Output = Self;
 
     /// Shifts left by `shift` bits, masking the result to `I + F` bits.
@@ -155,7 +167,7 @@ impl<const I: u32, const F: u32> ops::Shl<u32> for Q<I, F> {
     }
 }
 
-impl<const I: u32, const F: u32> ops::ShlAssign<u32> for Q<I, F> {
+impl<I: Unsigned, F: Unsigned> ops::ShlAssign<u32> for Q<I, F> {
     /// Shifts left in place.
     ///
     /// # Arguments
@@ -167,7 +179,7 @@ impl<const I: u32, const F: u32> ops::ShlAssign<u32> for Q<I, F> {
     }
 }
 
-impl<const I: u32, const F: u32> ops::Shr<u32> for Q<I, F> {
+impl<I: Unsigned, F: Unsigned> ops::Shr<u32> for Q<I, F> {
     type Output = Self;
 
     /// Arithmetic right shift (sign-preserving) by `shift` bits.
@@ -185,7 +197,7 @@ impl<const I: u32, const F: u32> ops::Shr<u32> for Q<I, F> {
     }
 }
 
-impl<const I: u32, const F: u32> ops::ShrAssign<u32> for Q<I, F> {
+impl<I: Unsigned, F: Unsigned> ops::ShrAssign<u32> for Q<I, F> {
     /// Shifts right in place (arithmetic / sign-preserving).
     ///
     /// # Arguments
@@ -201,7 +213,7 @@ impl<const I: u32, const F: u32> ops::ShrAssign<u32> for Q<I, F> {
 // Q<I, F>: BitAnd, BitOr
 // ---------------------------------------------------------------------------
 
-impl<const I: u32, const F: u32> ops::BitAnd for Q<I, F> {
+impl<I: Unsigned, F: Unsigned> ops::BitAnd for Q<I, F> {
     type Output = Self;
 
     /// Bitwise AND of two `Q<I, F>` values.
@@ -219,7 +231,7 @@ impl<const I: u32, const F: u32> ops::BitAnd for Q<I, F> {
     }
 }
 
-impl<const I: u32, const F: u32> ops::BitOr for Q<I, F> {
+impl<I: Unsigned, F: Unsigned> ops::BitOr for Q<I, F> {
     type Output = Self;
 
     /// Bitwise OR of two `Q<I, F>` values.
@@ -245,13 +257,15 @@ impl<const I: u32, const F: u32> ops::BitOr for Q<I, F> {
 // UQ<I, F>: Add
 // ---------------------------------------------------------------------------
 
-impl<const I: u32, const F: u32> ops::Add for UQ<I, F>
+impl<I, F> ops::Add for UQ<I, F>
 where
-    [(); (I + 1 + F) as usize]:,
+    I: Unsigned + ops::Add<U1>,
+    F: Unsigned,
+    Sum<I, U1>: Unsigned,
 {
-    type Output = UQ<{ I + 1 }, F>;
+    type Output = UQ<Sum<I, U1>, F>;
 
-    /// Adds two `UQ<I, F>` values, producing `UQ<{I+1}, F>`.
+    /// Adds two `UQ<I, F>` values, producing `UQ<Sum<I, U1>, F>`.
     ///
     /// The extra integer bit guarantees no overflow.
     ///
@@ -261,10 +275,10 @@ where
     ///
     /// # Returns
     ///
-    /// The exact sum as `UQ<{I+1}, F>`.
+    /// The exact sum as `UQ<Sum<I, U1>, F>`.
     #[inline]
     fn add(self, rhs: Self) -> Self::Output {
-        UQ::<{ I + 1 }, F>::from_raw(self.raw() + rhs.raw())
+        UQ::<Sum<I, U1>, F>::from_raw(self.raw() + rhs.raw())
     }
 }
 
@@ -272,13 +286,15 @@ where
 // UQ<I, F>: Sub → signed Q output
 // ---------------------------------------------------------------------------
 
-impl<const I: u32, const F: u32> ops::Sub for UQ<I, F>
+impl<I, F> ops::Sub for UQ<I, F>
 where
-    [(); (I + 1 + F) as usize]:,
+    I: Unsigned + ops::Add<U1>,
+    F: Unsigned,
+    Sum<I, U1>: Unsigned,
 {
-    type Output = Q<{ I + 1 }, F>;
+    type Output = Q<Sum<I, U1>, F>;
 
-    /// Subtracts two `UQ<I, F>` values, producing signed `Q<{I+1}, F>`.
+    /// Subtracts two `UQ<I, F>` values, producing signed `Q<Sum<I, U1>, F>`.
     ///
     /// The result is signed because `UQ - UQ` can be negative.
     ///
@@ -288,10 +304,10 @@ where
     ///
     /// # Returns
     ///
-    /// The exact difference as signed `Q<{I+1}, F>`.
+    /// The exact difference as signed `Q<Sum<I, U1>, F>`.
     #[inline]
     fn sub(self, rhs: Self) -> Self::Output {
-        Q::<{ I + 1 }, F>::from_raw(self.raw() as i64 - rhs.raw() as i64)
+        Q::<Sum<I, U1>, F>::from_raw(self.raw() as i64 - rhs.raw() as i64)
     }
 }
 
@@ -299,14 +315,16 @@ where
 // UQ<I, F>: Mul
 // ---------------------------------------------------------------------------
 
-impl<const I: u32, const F: u32> ops::Mul for UQ<I, F>
+impl<I, F> ops::Mul for UQ<I, F>
 where
-    [(); (I + I + F + F) as usize]:,
-    [(); { F + F } as usize]:,
+    I: Unsigned + ops::Add<I>,
+    F: Unsigned + ops::Add<F>,
+    Sum<I, I>: Unsigned,
+    Sum<F, F>: Unsigned,
 {
-    type Output = UQ<{ I + I }, { F + F }>;
+    type Output = UQ<Sum<I, I>, Sum<F, F>>;
 
-    /// Multiplies two `UQ<I, F>` values, producing `UQ<{I+I}, {F+F}>`.
+    /// Multiplies two `UQ<I, F>` values, producing `UQ<Sum<I, I>, Sum<F, F>>`.
     ///
     /// The full-width product cannot overflow.
     /// Use `.truncate()` or `.saturate()` to narrow the result.
@@ -317,11 +335,11 @@ where
     ///
     /// # Returns
     ///
-    /// The exact product as `UQ<{I+I}, {F+F}>`.
+    /// The exact product as `UQ<Sum<I, I>, Sum<F, F>>`.
     #[inline]
     fn mul(self, rhs: Self) -> Self::Output {
         let product = self.raw() as u128 * rhs.raw() as u128;
-        UQ::<{ I + I }, { F + F }>::from_raw(product as u64)
+        UQ::<Sum<I, I>, Sum<F, F>>::from_raw(product as u64)
     }
 }
 
@@ -329,7 +347,7 @@ where
 // UQ<I, F>: Shl, Shr
 // ---------------------------------------------------------------------------
 
-impl<const I: u32, const F: u32> ops::Shl<u32> for UQ<I, F> {
+impl<I: Unsigned, F: Unsigned> ops::Shl<u32> for UQ<I, F> {
     type Output = Self;
 
     /// Shifts left by `shift` bits, masking the result to `I + F` bits.
@@ -347,7 +365,7 @@ impl<const I: u32, const F: u32> ops::Shl<u32> for UQ<I, F> {
     }
 }
 
-impl<const I: u32, const F: u32> ops::ShlAssign<u32> for UQ<I, F> {
+impl<I: Unsigned, F: Unsigned> ops::ShlAssign<u32> for UQ<I, F> {
     /// Shifts left in place.
     ///
     /// # Arguments
@@ -359,7 +377,7 @@ impl<const I: u32, const F: u32> ops::ShlAssign<u32> for UQ<I, F> {
     }
 }
 
-impl<const I: u32, const F: u32> ops::Shr<u32> for UQ<I, F> {
+impl<I: Unsigned, F: Unsigned> ops::Shr<u32> for UQ<I, F> {
     type Output = Self;
 
     /// Logical right shift (zero-fill) by `shift` bits.
@@ -377,7 +395,7 @@ impl<const I: u32, const F: u32> ops::Shr<u32> for UQ<I, F> {
     }
 }
 
-impl<const I: u32, const F: u32> ops::ShrAssign<u32> for UQ<I, F> {
+impl<I: Unsigned, F: Unsigned> ops::ShrAssign<u32> for UQ<I, F> {
     /// Shifts right in place (logical / zero-fill).
     ///
     /// # Arguments
@@ -393,7 +411,7 @@ impl<const I: u32, const F: u32> ops::ShrAssign<u32> for UQ<I, F> {
 // UQ<I, F>: BitAnd, BitOr
 // ---------------------------------------------------------------------------
 
-impl<const I: u32, const F: u32> ops::BitAnd for UQ<I, F> {
+impl<I: Unsigned, F: Unsigned> ops::BitAnd for UQ<I, F> {
     type Output = Self;
 
     /// Bitwise AND of two `UQ<I, F>` values.
@@ -411,7 +429,7 @@ impl<const I: u32, const F: u32> ops::BitAnd for UQ<I, F> {
     }
 }
 
-impl<const I: u32, const F: u32> ops::BitOr for UQ<I, F> {
+impl<I: Unsigned, F: Unsigned> ops::BitOr for UQ<I, F> {
     type Output = Self;
 
     /// Bitwise OR of two `UQ<I, F>` values.
