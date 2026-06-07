@@ -1,14 +1,14 @@
 {
-    "name": "SystemRS Development",
+    "name": "QFixed Development",
     "build": {
         "dockerfile": "Dockerfile",
         "context": ".."
     },
     "remoteUser": "vscode",
-    "workspaceFolder": "/workspaces/systemrs",
+    "workspaceFolder": "/workspaces/qfixed",
     "mounts": [
-        "source=systemrs-cargo-registry,target=/opt/cargo/registry,type=volume",
-        "source=systemrs-cargo-git,target=/opt/cargo/git,type=volume"
+        "source=qfixed-cargo-registry,target=/opt/cargo/registry,type=volume",
+        "source=qfixed-cargo-git,target=/opt/cargo/git,type=volume"
     ],
     "containerEnv": {
         "GIT_EDITOR": "code --wait"
@@ -30,8 +30,7 @@
                 "EditorConfig.EditorConfig",
                 "Anthropic.claude-code",
                 "streetsidesoftware.code-spell-checker",
-                "mutantdino.resourcemonitor",
-                "MermaidChart.vscode-mermaid-chart"
+                "mutantdino.resourcemonitor"
             ],
             "settings": {
                 "terminal.integrated.defaultProfile.linux": "bash",
@@ -50,12 +49,10 @@
                 "rust-analyzer.check.command": "clippy",
                 "rust-analyzer.cargo.buildScripts.enable": true,
                 "files.watcherExclude": {
-                    "**/target/**": true,
-                    "**/external/**": true
+                    "**/target/**": true
                 },
                 "search.exclude": {
-                    "**/target": true,
-                    "**/external": true
+                    "**/target": true
                 }
             }
         }

@@ -1,36 +1,31 @@
-# SystemRS Development Container
+# QFixed Development Container
 #
-# SystemRS is a pure-Rust, host-based TLM simulation library (a TLM-only
-# equivalent of SystemC). This image therefore provides:
-#   - a Rust toolchain (current stable + the project MSRV) with rustfmt/clippy;
-#   - the cargo quality tools the project's checks rely on (deny, audit, nextest);
-#   - a C/C++ toolchain + CMake for the `cxx`-based SystemC interop
-#     (`systemrs-ffi`, built against external/systemc under the `cosim` feature);
+# QFixed is a pure-Rust library of bit-accurate fixed-point types using
+# Texas Instruments style Q notation, intended for RTL digital-twin modeling.
+# As a host-only, dependency-light Rust crate it needs only:
+#   - a Rust toolchain (current stable) with rustfmt/clippy;
+#   - the cargo quality tools the build-verification checks rely on
+#     (deny, audit — see the claude-skill-rust skill);
 #   - the Claude Code CLI (native installer).
 #
-# It deliberately does NOT carry FPGA/USB programming tools, embedded
-# cross-compilation targets, or register-generation/datasheet tooling — none of
-# which a host-only TLM simulator needs.
+# It deliberately carries no C/C++/CMake toolchain, FPGA/USB programming tools,
+# or cross-compilation targets — none of which a pure-Rust numeric library needs.
 FROM ubuntu:24.04
 
 # Avoid prompts during package installation.
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Base build dependencies.
-#   build-essential + cmake + pkg-config back the `cc`/`cxx` crates and let us
-#   build the vendored SystemC reference (external/systemc) for co-simulation.
-#   openssh-client is a *Recommends* of git, so --no-install-recommends drops it;
-#   we add it explicitly so `git push` over an SSH remote can use VS Code's
-#   forwarded ssh-agent (SSH_AUTH_SOCK).
+# Base packages.
+#   build-essential supplies the `cc` linker that rustc needs to link test and
+#   release binaries (and bundles make). openssh-client is a *Recommends* of
+#   git, so --no-install-recommends drops it; we add it explicitly so `git push`
+#   over an SSH remote can use VS Code's forwarded ssh-agent (SSH_AUTH_SOCK).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    cmake \
-    pkg-config \
     git \
     openssh-client \
     curl \
     ca-certificates \
-    make \
     sudo \
     locales \
     && rm -rf /var/lib/apt/lists/*
@@ -43,8 +38,8 @@ ENV LC_ALL=en_US.UTF-8
 
 # Install Rust via rustup into a shared location that is on PATH for every user.
 # A minimal profile keeps the image small; rustfmt + clippy are added explicitly
-# because the project's build-verification sequence (see CLAUDE.md / the Rust
-# skill) runs `cargo fmt` and `cargo clippy`.
+# because the build-verification sequence (see the Rust skill) runs `cargo fmt`
+# and `cargo clippy`.
 ENV RUSTUP_HOME=/opt/rustup
 ENV CARGO_HOME=/opt/cargo
 ENV PATH="${CARGO_HOME}/bin:${PATH}"
@@ -52,20 +47,14 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     | sh -s -- -y --profile minimal --default-toolchain stable \
     && rustup component add rustfmt clippy
 
-# Keep the project MSRV available so `cargo +1.90 ...` reproduces the MSRV leg of
-# CI locally (the workspace pins rust-version = "1.90"; CI also tests stable).
-RUN rustup toolchain install 1.90 --profile minimal \
-    && rustup component add --toolchain 1.90 rustfmt clippy
-
-# Refresh toolchains to the latest patch/release so image rebuilds don't keep a
-# layer-cache-stale `stable`. (The 1.90 MSRV pin only moves within its patch series.)
+# Refresh the toolchain to the latest patch/release so image rebuilds don't keep
+# a layer-cache-stale `stable`.
 RUN rustup update
 
 # Cargo quality tools used by the build-verification workflow:
 #   cargo-deny  — license + advisory + duplicate-version gate (deny.toml)
 #   cargo-audit — RustSec vulnerability scanner
-#   cargo-nextest — fast test runner for the conformance/integration suites
-RUN cargo install --locked cargo-deny cargo-audit cargo-nextest
+RUN cargo install --locked cargo-deny cargo-audit
 
 # Create non-root user for development (handle existing UID/GID 1000).
 ARG USERNAME=vscode
@@ -95,11 +84,11 @@ RUN mkdir -p /opt/cargo/registry /opt/cargo/git \
 
 # Store Claude Code config in the workspace so plans and memory persist across
 # devcontainer rebuilds.
-ENV CLAUDE_CONFIG_DIR=/workspaces/systemrs/.claude
+ENV CLAUDE_CONFIG_DIR=/workspaces/qfixed/.claude
 
 # Final user switch + workdir (matches workspaceFolder in devcontainer.json).
 USER ${USERNAME}
-WORKDIR /workspaces/systemrs
+WORKDIR /workspaces/qfixed
 
 # Install Claude Code via the official native installer. It bundles its own
 # runtime (no Node.js required) and installs into the dev user's ~/.local/bin,

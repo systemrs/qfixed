@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
 #
-# Runs once, the first time the SystemRS devcontainer is created.
+# Runs once, the first time the QFixed devcontainer is created.
 # Keep everything here idempotent and non-fatal — a failed optional step should
 # not block the container from coming up.
 set -euo pipefail
 
-WORKSPACE="/workspaces/systemrs"
+WORKSPACE="/workspaces/qfixed"
 
-echo "==> SystemRS devcontainer: post-create"
+echo "==> QFixed devcontainer: post-create"
 
 # Devcontainers frequently see the bind-mounted repo as "dubious ownership".
 git config --global --add safe.directory "${WORKSPACE}" || true
+
+# QFixed vendors the shared Rust skill as a git submodule
+# (.claude/skills/claude-skill-rust). Make sure it is checked out.
+if [ -f "${WORKSPACE}/.gitmodules" ]; then
+    echo "==> Initialising git submodules"
+    git -C "${WORKSPACE}" submodule update --init --recursive || true
+fi
 
 # Ensure the components the Rust skill's checks need are present (the image
 # installs them, but a toolchain update could drop them).
@@ -29,24 +36,14 @@ for cache in /opt/cargo/registry /opt/cargo/git; do
     fi
 done
 
-# Warm the crate cache once the workspace has been initialised as a Cargo
-# workspace (see doc/systemrs-design.md §10 for the planned 14-crate layout).
+# Warm the crate cache once a Cargo manifest is present at the repo root.
 if [ -f "${WORKSPACE}/Cargo.toml" ]; then
     echo "==> Fetching crate dependencies (cargo fetch)"
     cargo fetch --manifest-path "${WORKSPACE}/Cargo.toml" || true
 else
-    echo "==> No Cargo.toml yet — the Cargo workspace has not been created."
-    echo "    See doc/systemrs-design.md §10 for the crate structure to scaffold."
-fi
-
-# The cxx/SystemC co-simulation path (systemrs-ffi, 'cosim' feature) builds
-# against a SystemC checkout vendored at external/systemc (gitignored).
-if [ -d "${WORKSPACE}/external/systemc" ]; then
-    echo "==> external/systemc present — SystemC interop ('cosim') is available."
-else
-    echo "==> external/systemc not found."
-    echo "    The 'cosim' feature builds against a SystemC source tree at"
-    echo "    external/systemc. Clone one there when you need co-simulation."
+    echo "==> No workspace Cargo.toml at the repo root yet — skipping cargo fetch."
+    echo "    The crates live under crates/; add a root Cargo.toml with a"
+    echo "    [workspace] table to tie them together."
 fi
 
 echo "==> post-create complete"
