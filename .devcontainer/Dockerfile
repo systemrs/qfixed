@@ -37,21 +37,24 @@ ENV LANGUAGE=en_US:en
 ENV LC_ALL=en_US.UTF-8
 
 # Install Rust via rustup into a shared location that is on PATH for every user.
-# A minimal profile keeps the image small; rustfmt + clippy are added explicitly
-# because the build-verification sequence (see the Rust skill) runs `cargo fmt`
-# and `cargo clippy`.
+# The EXACT toolchain version comes from the repo's rust-toolchain.toml (copied
+# in below), so the image, the devcontainer, and CI all build with the same
+# pinned compiler — and a version bump in that file invalidates this layer so
+# the toolchain is never silently stale. rustfmt + clippy are installed because
+# the verification suite (scripts/ci.sh) runs `cargo fmt` and `cargo clippy`.
 ENV RUSTUP_HOME=/opt/rustup
 ENV CARGO_HOME=/opt/cargo
 ENV PATH="${CARGO_HOME}/bin:${PATH}"
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-    | sh -s -- -y --profile minimal --default-toolchain stable \
-    && rustup component add rustfmt clippy
+    | sh -s -- -y --profile minimal --default-toolchain none
+COPY rust-toolchain.toml /tmp/rust-toolchain.toml
+RUN TOOLCHAIN="$(sed -n 's/^channel = "\(.*\)"/\1/p' /tmp/rust-toolchain.toml)" \
+    && rustup toolchain install "${TOOLCHAIN}" --profile minimal --component rustfmt clippy \
+    && rustup default "${TOOLCHAIN}" \
+    && rm /tmp/rust-toolchain.toml \
+    && rustc --version && cargo clippy --version && cargo fmt --version
 
-# Refresh the toolchain to the latest patch/release so image rebuilds don't keep
-# a layer-cache-stale `stable`.
-RUN rustup update
-
-# Cargo quality tools used by the build-verification workflow:
+# Cargo quality tools used by the verification suite (scripts/ci.sh):
 #   cargo-deny  — license + advisory + duplicate-version gate (deny.toml)
 #   cargo-audit — RustSec vulnerability scanner
 RUN cargo install --locked cargo-deny cargo-audit
@@ -93,6 +96,14 @@ WORKDIR /workspaces/qfixed
 # Install Claude Code via the official native installer. It bundles its own
 # runtime (no Node.js required) and installs into the dev user's ~/.local/bin,
 # which the user owns and can auto-update in place.
+#
+# CI reuses this very Dockerfile but does not need the editor agent, so it
+# builds with `--build-arg INSTALL_CLAUDE_CODE=false` to skip the download and
+# keep the image lean. The default (true) preserves the local dev experience.
+ARG INSTALL_CLAUDE_CODE=true
 ENV PATH="/home/${USERNAME}/.local/bin:${PATH}"
-RUN curl -fsSL https://claude.ai/install.sh | bash \
-    && claude --version
+RUN if [ "${INSTALL_CLAUDE_CODE}" = "true" ]; then \
+    curl -fsSL https://claude.ai/install.sh | bash && claude --version; \
+    else \
+    echo "Skipping Claude Code install (INSTALL_CLAUDE_CODE=${INSTALL_CLAUDE_CODE})"; \
+    fi
