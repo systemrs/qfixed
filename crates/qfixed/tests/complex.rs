@@ -309,3 +309,51 @@ fn cq_iq_mixer_pipeline() {
     assert!((narrowed.re.to_f64() - (-0.5)).abs() < 1e-3);
     assert!((narrowed.im.to_f64() - 0.5).abs() < 1e-3);
 }
+
+// ---------------------------------------------------------------------------
+// Sum: componentwise logarithmic bit growth
+// ---------------------------------------------------------------------------
+
+/// Summing 64 `CQ<U8, U8>` values fits in `CQ<U14, U8>` (6 extra integer bits)
+/// without overflow, componentwise.
+#[test]
+fn cq_sum_64_values() {
+    let xs = [CQ::<U8, U8>::from_f64(2.0, -1.5); 64];
+    let total: CQ<U14, U8> = xs.iter().copied().sum();
+    assert!((total.re.to_f64() - 128.0).abs() < EPS);
+    assert!((total.im.to_f64() - (-96.0)).abs() < EPS);
+}
+
+/// CQ `Sum` over a borrowing iterator matches the owned result.
+#[test]
+fn cq_sum_borrowed() {
+    let xs = [
+        CQ::<U8, U8>::from_f64(1.0, 2.0),
+        CQ::<U8, U8>::from_f64(0.5, -0.25),
+    ];
+    let total: CQ<U10, U8> = xs.iter().sum();
+    assert!((total.re.to_f64() - 1.5).abs() < EPS);
+    assert!((total.im.to_f64() - 1.75).abs() < EPS);
+}
+
+/// CQ `Sum` of an empty iterator yields ZERO.
+#[test]
+fn cq_sum_empty_is_zero() {
+    let total: CQ<U14, U8> = core::iter::empty::<CQ<U8, U8>>().sum();
+    assert_eq!(total, CQ::<U14, U8>::ZERO);
+}
+
+/// CQ `try_sum` succeeds when wide enough and errors when either component
+/// would overflow the chosen output type.
+#[test]
+fn cq_try_sum_ok_and_overflow() {
+    let xs = [CQ::<U8, U8>::from_f64(2.0, -1.5); 64];
+    let total = CQ::<U14, U8>::try_sum(xs).unwrap();
+    assert!((total.re.to_f64() - 128.0).abs() < EPS);
+    assert!((total.im.to_f64() - (-96.0)).abs() < EPS);
+    // Same-as-input type cannot hold either component's total.
+    assert_eq!(
+        CQ::<U8, U8>::try_sum(xs),
+        Err(qfixed::FixedError::OutOfRange)
+    );
+}

@@ -28,6 +28,13 @@
 //! truncation semantics.
 //! Use `saturating_add`/`saturating_sub`/`saturating_mul` to clamp.
 //!
+//! Reduce many values with [`core::iter::Sum`] into a caller-chosen wider
+//! accumulator: summing `N` values grows the integer part by only
+//! `ceil(log2(N))` bits (64 values → 6 bits), not one bit per addition. The
+//! same applies to `UQ` and `CQ`. Use the `try_sum` associated function for a
+//! checked reduction that returns [`FixedError`] instead of wrapping when the
+//! chosen accumulator is too narrow.
+//!
 //! ```
 //! use qfixed::Q;
 //! use qfixed::typenum::{U4, U12};
