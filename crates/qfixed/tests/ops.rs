@@ -423,3 +423,125 @@ fn uq_widening_sub_frac_widen() {
     let diff: Q<U5, U8> = a.widening_sub(b);
     assert_eq!(diff.to_f64(), 1.5);
 }
+
+// ---------------------------------------------------------------------------
+// Sum: logarithmic bit growth into a caller-chosen accumulator
+// ---------------------------------------------------------------------------
+
+/// Summing 64 `Q<U12, U4>` values fits in `Q<U18, U4>` (only 6 extra integer
+/// bits, not 64) without overflow.
+#[test]
+fn q_sum_64_values_six_bits_growth() {
+    let xs = [Q::<U12, U4>::from(1000i32); 64];
+    let total: Q<U18, U4> = xs.iter().copied().sum();
+    assert_eq!(total.to_f64(), 64_000.0);
+}
+
+/// `Sum` works over owned values and preserves fractional precision.
+#[test]
+fn q_sum_owned_fractional() {
+    let xs = [
+        Q::<U8, U8>::from_f64(0.5),
+        Q::<U8, U8>::from_f64(0.25),
+        Q::<U8, U8>::from_f64(1.25),
+    ];
+    let total: Q<U10, U8> = xs.into_iter().sum();
+    assert!((total.to_f64() - 2.0).abs() < 1e-6);
+}
+
+/// `Sum` over a borrowing iterator (`&Q`) matches the owned result.
+#[test]
+fn q_sum_borrowed() {
+    let xs = [Q::<U8, U8>::from(3i32), Q::<U8, U8>::from(4i32)];
+    let total: Q<U10, U8> = xs.iter().sum();
+    assert_eq!(total.to_f64(), 7.0);
+}
+
+/// `Sum` handles negative values; the wide accumulator never overflows.
+#[test]
+fn q_sum_negative_values() {
+    let xs = [Q::<U4, U4>::MIN; 8]; // 8 * -8.0 = -64.0
+    let total: Q<U8, U4> = xs.iter().copied().sum();
+    assert_eq!(total.to_f64(), -64.0);
+}
+
+/// `Sum` of an empty iterator yields ZERO.
+#[test]
+fn q_sum_empty_is_zero() {
+    let total: Q<U18, U4> = core::iter::empty::<Q<U12, U4>>().sum();
+    assert_eq!(total, Q::<U18, U4>::ZERO);
+}
+
+/// `Sum` realigns the fractional point when `FO != F`.
+#[test]
+fn q_sum_frac_realign() {
+    let xs = [Q::<U8, U4>::from_f64(1.5), Q::<U8, U4>::from_f64(2.25)];
+    let total: Q<U10, U8> = xs.iter().copied().sum();
+    assert_eq!(total.to_f64(), 3.75);
+}
+
+/// UQ `Sum` grows logarithmically and stays unsigned.
+#[test]
+fn uq_sum_64_values() {
+    let xs = [UQ::<U8, U8>::from(200u32); 64];
+    let total: UQ<U14, U8> = xs.iter().copied().sum();
+    assert_eq!(total.to_f64(), 12_800.0);
+}
+
+/// UQ `Sum` over borrowed values, with fractional precision.
+#[test]
+fn uq_sum_borrowed_fractional() {
+    let xs = [
+        UQ::<U1, U7>::from_f64(0.5),
+        UQ::<U1, U7>::from_f64(0.25),
+        UQ::<U1, U7>::from_f64(0.125),
+    ];
+    let total: UQ<U3, U7> = xs.iter().sum();
+    assert!((total.to_f64() - 0.875).abs() < 1e-3);
+}
+
+// ---------------------------------------------------------------------------
+// try_sum: checked accumulation (errors instead of wrapping)
+// ---------------------------------------------------------------------------
+
+/// `try_sum` succeeds when the accumulator is wide enough for all N values.
+#[test]
+fn q_try_sum_ok() {
+    let xs = [Q::<U12, U4>::from(1000i32); 64];
+    let total = Q::<U18, U4>::try_sum(xs).unwrap();
+    assert_eq!(total.to_f64(), 64_000.0);
+}
+
+/// `try_sum` errors when the chosen output type is too narrow to hold the sum,
+/// rather than silently wrapping like the `Sum` impl.
+#[test]
+fn q_try_sum_too_narrow_errors() {
+    let xs = [Q::<U12, U4>::from(1000i32); 64];
+    assert_eq!(
+        Q::<U12, U4>::try_sum(xs),
+        Err(qfixed::FixedError::OutOfRange)
+    );
+}
+
+/// `try_sum` over an empty iterator is `Ok(ZERO)`.
+#[test]
+fn q_try_sum_empty_ok_zero() {
+    let total = Q::<U18, U4>::try_sum(core::iter::empty::<Q<U12, U4>>()).unwrap();
+    assert_eq!(total, Q::<U18, U4>::ZERO);
+}
+
+/// `try_sum` accepts borrowing iterators and detects negative overflow.
+#[test]
+fn q_try_sum_negative_overflow_errors() {
+    let xs = [Q::<U4, U4>::MIN; 8]; // 8 * -8.0 = -64.0, needs |I| >= 8
+    assert!(Q::<U6, U4>::try_sum(xs.iter().copied()).is_err());
+    assert_eq!(Q::<U8, U4>::try_sum(xs).unwrap().to_f64(), -64.0);
+}
+
+/// UQ `try_sum` succeeds within range and errors on overflow.
+#[test]
+fn uq_try_sum_ok_and_overflow() {
+    let xs = [UQ::<U8, U8>::from(200u32); 64]; // 12_800 needs 14 integer bits
+    assert_eq!(UQ::<U14, U8>::try_sum(xs).unwrap().to_f64(), 12_800.0);
+    assert!(UQ::<U8, U8>::try_sum(xs).is_err());
+}
