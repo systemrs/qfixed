@@ -4,8 +4,9 @@
 # Texas Instruments style Q notation, intended for RTL digital-twin modeling.
 # As a host-only, dependency-light Rust crate it needs only:
 #   - a Rust toolchain (current stable) with rustfmt/clippy;
-#   - the cargo quality tools the build-verification checks rely on
-#     (deny, audit — see the claude-skill-rust skill);
+#   - the `just` command runner plus the cargo quality tools the
+#     build-verification checks rely on (deny, audit, semver-checks — see the
+#     justfile and the claude-skill-rust skill);
 #   - the Claude Code CLI (native installer).
 #
 # It deliberately carries no C/C++/CMake toolchain, FPGA/USB programming tools,
@@ -54,10 +55,14 @@ RUN TOOLCHAIN="$(sed -n 's/^channel = "\(.*\)"/\1/p' /tmp/rust-toolchain.toml)" 
     && rm /tmp/rust-toolchain.toml \
     && rustc --version && cargo clippy --version && cargo fmt --version
 
-# Cargo quality tools used by the verification suite (scripts/ci.sh):
-#   cargo-deny  — license + advisory + duplicate-version gate (deny.toml)
-#   cargo-audit — RustSec vulnerability scanner
-RUN cargo install --locked cargo-deny cargo-audit
+# The `just` command runner and the cargo quality tools used by the task runner
+# (justfile / scripts/), so `just ci` runs the same steps in the devcontainer and
+# in CI:
+#   just                — task runner that wraps the scripts/ per-step commands
+#   cargo-deny          — license + advisory + duplicate-version gate (deny.toml)
+#   cargo-audit         — RustSec vulnerability scanner
+#   cargo-semver-checks — SemVer public-API gate for the `just semver-checks` recipe
+RUN cargo install --locked just cargo-deny cargo-audit cargo-semver-checks
 
 # Create non-root user for development (handle existing UID/GID 1000).
 ARG USERNAME=vscode

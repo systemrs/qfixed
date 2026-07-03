@@ -28,10 +28,11 @@ jobs:
 
       # Build the SAME image used for local development
       # (.devcontainer/Dockerfile). It already carries the pinned Rust toolchain
-      # (rust-toolchain.toml) plus cargo-deny and cargo-audit, so CI and the
-      # devcontainer run identical tooling. Claude Code is skipped to keep the
-      # CI image lean. GitHub Actions layer caching makes subsequent runs fast —
-      # the slow `cargo install` layer is only rebuilt when its inputs change.
+      # (rust-toolchain.toml) plus the `just` runner and cargo-deny/cargo-audit/
+      # cargo-semver-checks, so CI and the devcontainer run identical tooling.
+      # Claude Code is skipped to keep the CI image lean. GitHub Actions layer
+      # caching makes subsequent runs fast — the slow `cargo install` layer is
+      # only rebuilt when its inputs change.
       - name: Build dev container image
         uses: docker/build-push-action@v6
         with:
@@ -43,11 +44,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Run the shared verification suite inside that image. scripts/ci.sh is the
-      # single source of truth for what runs (fmt, clippy default + all-features
-      # + release, build, test debug + release, doc, cargo-deny, cargo-audit) and
-      # is runnable locally too. --user root avoids a uid mismatch with the
-      # bind-mounted checkout.
+      # Run the shared verification suite inside that image via the task runner.
+      # `just ci` runs scripts/ci.sh — the single source of truth for what runs
+      # (fmt, clippy default + all-features + release, test debug + release,
+      # build, doc, cargo-deny, cargo-audit) and runnable locally the same way.
+      # --user root avoids a uid mismatch with the bind-mounted checkout.
       - name: Run checks in container
         run: |
           docker run --rm \
@@ -56,14 +57,14 @@ jobs:
             -v "${{ github.workspace }}:/workspaces/qfixed" \
             -w /workspaces/qfixed \
             qfixed-dev:ci \
-            bash scripts/ci.sh
+            just ci
 
       # Verify the crate actually builds and tests on its declared MSRV
-      # (rust-version = "1.90" in Cargo.toml). Reuses the same image and installs
-      # 1.90.0 on top; `cargo +1.90.0` overrides the pinned default for these
-      # commands. fmt/clippy are intentionally NOT run on the MSRV (lint and
-      # format output drift between compiler versions).
-      - name: Verify MSRV (Rust 1.90) builds and tests
+      # (rust-version in Cargo.toml, currently 1.90). `just msrv` reads that
+      # floor from Cargo.toml, installs the matching toolchain on top of the
+      # image, and builds + tests with it. fmt/clippy are intentionally NOT run
+      # on the MSRV (lint and format output drift between compiler versions).
+      - name: Verify MSRV builds and tests
         run: |
           docker run --rm \
             --user root \
@@ -71,8 +72,4 @@ jobs:
             -v "${{ github.workspace }}:/workspaces/qfixed" \
             -w /workspaces/qfixed \
             qfixed-dev:ci \
-            bash -c 'set -euo pipefail; \
-              git config --global --add safe.directory "$(pwd)"; \
-              rustup toolchain install 1.90.0 --profile minimal; \
-              cargo +1.90.0 build --locked --workspace --all-features; \
-              cargo +1.90.0 test --locked --workspace --all-features'
+            just msrv
