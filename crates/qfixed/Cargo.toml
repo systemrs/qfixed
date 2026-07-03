@@ -8,6 +8,9 @@ description = "Bit-accurate fixed-point types with Q-notation for RTL digital tw
 
 [features]
 default = []
+# Enables the growable packed containers (`PackedVec`, `PackedBitsVec`), which
+# need an allocator. Pulls in the `alloc` crate only; no external dependency.
+alloc = []
 serde = ["dep:serde"]
 
 [dependencies]
