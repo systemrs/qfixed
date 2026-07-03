@@ -9,6 +9,15 @@ This repository implements fixed-point arithmetic types based on Texas Instrumen
 
 `I` and `F` are [`typenum`](https://docs.rs/typenum) type-level integers (`U0`, `U1`, `U8`, …). Arithmetic operators return widened output types that cannot overflow; use `.truncate()` or `.saturate()` to narrow back down, or the `wrapping_*` / `saturating_*` methods for same-width RTL semantics.
 
+## Compact storage
+
+The scalar types are always backed by an `i64`/`u64` (a `CQ` by two), which is convenient for arithmetic but wasteful for large buffers. The packed containers (re-exported at the crate root) store bulk arrays in the smallest integer that fits each value's bit width, without changing the scalar types or their `const fn` API:
+
+- `PackedArray<T, N>` / `PackedVec<T>` — byte-granular: each element uses the smallest primitive (`i8`/`i16`/`i32`/`i64`), up to 8× smaller than `[T; N]` for ≤ 8-bit types. `PackedVec` needs the `alloc` feature.
+- `PackedBits<T, BYTES>` / `PackedBitsVec<T>` — bit-exact: each element occupies exactly `I + F` bits (e.g. 12-bit ADC samples pack at 12 bits, not 16), at the cost of slower shift/mask access. `PackedBitsVec` needs the `alloc` feature.
+
+Packing is lossless; elements are returned by value (`get`) and written with `set`.
+
 ## License
 
 Licensed under either of

@@ -71,11 +71,18 @@
 #![allow(dead_code)]
 #![allow(unused_crate_dependencies)]
 
+// `alloc` is pulled in only for the growable packed containers (`PackedVec`,
+// `PackedBitsVec`), which live behind the opt-in `alloc` feature. The scalar
+// types and the fixed-capacity containers stay strictly `no_std`.
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
 mod convert;
 mod cq;
 mod error;
 mod fmt;
 mod ops;
+mod packed;
 mod q;
 #[cfg(feature = "serde")]
 mod serde_impl;
@@ -85,6 +92,13 @@ pub use cq::CQ;
 pub use error::FixedError;
 pub use q::Q;
 pub use uq::UQ;
+
+pub use packed::{BitPackable, Packable, PackedArray, PackedBits};
+
+/// The growable, allocator-backed packed containers, available with the
+/// `alloc` feature.
+#[cfg(feature = "alloc")]
+pub use packed::{PackedBitsVec, PackedVec};
 
 /// Re-export of [`typenum`], whose type-level unsigned integers (`U0`, `U1`,
 /// `U8`, …) supply the `I` and `F` parameters, e.g. `Q<U12, U4>`.
