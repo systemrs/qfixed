@@ -1,0 +1,25 @@
+# release-plz configuration — https://release-plz.dev/docs/config
+#
+# qfixed is a single-crate workspace whose version lives in `[workspace.package]`
+# (`version.workspace = true` in crates/qfixed/Cargo.toml). On every push to master,
+# release-plz opens/updates a "Release" PR that derives the next version from the
+# Conventional Commits since the last release and updates the changelog. When that PR
+# is merged, release-plz tags the commit, creates a GitHub release, and publishes to
+# crates.io.
+#
+# The options below are release-plz's defaults, stated explicitly as documentation.
+[workspace]
+# Fail the release PR when a public-API change is SemVer-incompatible with the last
+# crates.io release (runs cargo-semver-checks; a break forces the correct bump). Before
+# the crate has a published baseline this check simply skips.
+semver_check = true
+# Maintain crates/qfixed/CHANGELOG.md from the Conventional Commit history.
+changelog_update = true
+# On release, create the git tag and a GitHub release.
+git_tag_enable = true
+git_release_enable = true
+# Publish to crates.io. The actual `cargo publish` runs in
+# .github/workflows/release-plz.yml — gated by the protected `crates-io-publish`
+# environment (manual approval) and authenticated via crates.io Trusted Publishing
+# (short-lived OIDC token, no stored registry secret).
+publish = true

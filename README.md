@@ -1,5 +1,16 @@
 # qfixed
+
+[![CI](https://github.com/systemrs/qfixed/actions/workflows/ci.yml/badge.svg)](https://github.com/systemrs/qfixed/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/qfixed.svg?logo=rust)](https://crates.io/crates/qfixed)
+[![docs.rs](https://img.shields.io/docsrs/qfixed?logo=docsdotrs)](https://docs.rs/qfixed)
+[![MSRV](https://img.shields.io/crates/msrv/qfixed.svg?logo=rust)](https://www.rust-lang.org)
+[![License: MIT OR Apache-2.0](https://img.shields.io/crates/l/qfixed.svg)](#license)
+
 This repository implements fixed-point arithmetic types based on Texas Instruments style Q notation.
+
+```sh
+cargo add qfixed
+```
 
 ## Types
 

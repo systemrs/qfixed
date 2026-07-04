@@ -3,7 +3,21 @@ resolver = "2"
 members = ["crates/*"]
 
 # Shared package metadata inherited by member crates via `<field>.workspace = true`.
+#
+# Versioning is LOCKSTEP: the crate uses `version.workspace = true`, so the whole
+# workspace shares this one version. release-plz derives the bump from Conventional
+# Commits and moves it. The `gate` job in .github/workflows/release-plz.yml also
+# reads the `version` line below to decide whether a push is a release.
 [workspace.package]
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.90"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/systemrs/qfixed"
+homepage = "https://github.com/systemrs/qfixed"
+authors = ["Nicholas Londey <londey@gmail.com>"]
+# Inherited by the crate via `keywords.workspace = true` / `categories.workspace = true`.
+# crates.io caps keywords at 5 (<=20 chars each); every category must be a valid slug
+# (see https://crates.io/category_slugs).
+keywords = ["fixed-point", "q-notation", "dsp", "rtl", "no-std"]
+categories = ["mathematics", "no-std", "embedded", "science"]
